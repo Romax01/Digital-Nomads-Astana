@@ -90,11 +90,15 @@ def build_topology(cfg: dict) -> dict:
     for z in cfg["zones"]:
         ztracks = [t for t in tracks if t["zone_id"] == z["id"]]
         if ztracks:
-            xs = [p[0] for t in ztracks for p in t["points"]]
-            ys = [p[1] for t in ztracks for p in t["points"]]
-            x, y = sum(xs) / len(xs), max(ys) + gap * 0.9
+            # подпись — у тупикового конца пути, на его уровне: соседние фронты не накладываются
+            t0 = ztracks[0]
+            ends = [nodes[t0["from_node"]], nodes[t0["to_node"]]]
+            dead = next((n for n in ends if n["kind"] == "end"), ends[0])
+            other = ends[1] if dead is ends[0] else ends[0]
+            x = dead["x"] - 78 if dead["x"] < other["x"] else dead["x"] + 78
+            y = sum(t["points"][0][1] for t in ztracks) / len(ztracks)
         elif z["kind"] == "inspection":
-            x, y = (L["x_west"] + L["x_east"]) / 2, -gap * 1.4
+            x, y = (L["x_west"] + L["x_east"]) / 2 - 260, -gap * 1.4
         else:
             x, y = L["x_east"] - 60, -gap * 1.4
         zones.append({"id": f"{sid}-Z{z['id']}", "code": z["id"], "name": z["name"], "kind": z["kind"],

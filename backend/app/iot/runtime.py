@@ -136,8 +136,9 @@ class IngestService:
             if not items:
                 continue
             t0 = time.perf_counter()
+            from app.core.runtime_lock import world_lock
             try:
-                with SessionLocal() as db:
+                with world_lock, SessionLocal() as db:
                     res = self.processor.process_batch(db, items)
                     db.commit()
             except Exception:

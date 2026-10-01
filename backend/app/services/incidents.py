@@ -154,6 +154,9 @@ def register_faulty_wagon(db: Session, w: Wagon, *, source: str, model_time: dat
             inc.params = {**inc.params, "uncoupling_op": unc.id, "repair_op": rep.id}
     elif train and not depot:
         inc.description += " На станции нет ремонтной зоны: отправление состава с неисправным вагоном моделью не допускается, требуется решение диспетчера."
+    sim = db.get(SimState, 1)
+    if sim and (sim.world or {}).get("diag_faulty_next"):
+        sim.world = {**sim.world, "diag_faulty_next": False}  # сценарная неисправность обнаружена
     audit(db, user, "incident.create", "incident", inc.id, inc.title, after={"wagon": w.number, "source": source},
           model_time=now)
     domain_event(db, "incident.created", f"{inc.title}. {inc.description}", severity="warning",

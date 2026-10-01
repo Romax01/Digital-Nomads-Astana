@@ -158,7 +158,7 @@ def train_card(train_id: str, db: Session = Depends(get_db), _: User = Depends(r
                             "actual_start": iso(o.actual_start), "actual_end": iso(o.actual_end),
                             "resources": [model.resources[r].name for r in (o.resource_ids or []) if r in model.resources],
                             "route": o.route_nodes, "reserved": o.reserved, "note": o.note} for o in ops],
-            "wagons": [{"number": w.number, "kind": w.kind, "length_m": w.length_m, "condition": w.condition,
+            "wagons": [{"id": w.id, "number": w.number, "kind": w.kind, "length_m": w.length_m, "condition": w.condition,
                         "loaded": w.loaded, "last_checkpoint": w.last_checkpoint, "last_seen_at": iso(w.last_seen_at)}
                        for w in sorted(model.wagons_by_train.get(t.id, []), key=lambda w: w.position)],
             "reservations": [{"key": r.resource_key, "start": iso(r.start_at), "end": iso(r.end_at), "purpose": r.purpose}
@@ -607,11 +607,24 @@ def sim_reset(body: S.ResetIn, db: Session = Depends(get_db), user: User = Depen
     from app.sim.seed import reset_world
     if body.scenario not in SCENARIOS:
         raise AppError("UNKNOWN_SCENARIO", "Неизвестный сценарий.", details={"scenarios": list(SCENARIOS)})
+    from sqlalchemy.exc import OperationalError
+    from app.core.runtime_lock import world_lock
     cfg = body.station_config or db.get(SimState, 1).station_config
-    reset_world(db, cfg, body.scenario, body.seed)
-    _sim_audit(db, user, "sim.reset", f"Сброс симуляции: сценарий «{SCENARIOS[body.scenario]['title']}», seed {body.seed}, конфигурация {cfg}")
-    db.commit()
-    hub.reset_state()
+    db.rollback()  # не держим блокировок до захвата world_lock
+    with world_lock:
+        for attempt in range(3):
+            try:
+                reset_world(db, cfg, body.scenario, body.seed)
+                _sim_audit(db, user, "sim.reset", f"Сброс симуляции: сценарий «{SCENARIOS[body.scenario]['title']}», "
+                                                  f"seed {body.seed}, конфигурация {cfg}")
+                db.commit()
+                break
+            except OperationalError:
+                db.rollback()
+                if attempt == 2:
+                    raise AppError("RESET_BUSY", "Сброс не выполнен: база занята фоновыми операциями.", status=503,
+                                   hint="Повторите через несколько секунд.")
+        hub.reset_state()
     from app.core import bus
     bus.publish("plan_state_changed", {"reason": "reset"})
     return {"scenario": body.scenario, "seed": body.seed, "station_config": cfg}

@@ -264,6 +264,8 @@ def build_view(db: Session, model: StationModel, engine_waiting: dict, index: di
         "incidents": incidents, "conflicts": {c["id"]: c for c in conflicts}, "recommendations": recs,
         "requests": requests, "alerts": alerts, "switches": switches,
         "index": index, "plan": plan, "kpi": kpi,
+        "maintenance": [{"id": m.id, "object_type": m.object_type, "object_id": m.object_id, "start": iso(m.start_at),
+                         "end": iso(m.end_at), "reason": m.reason} for m in model.maintenance],
     }
 
 
@@ -288,7 +290,7 @@ def loco_position(model, r: Resource, cur, trains, zones):
     return None
 
 
-SINGLETONS = ("meta", "index", "plan", "kpi")
+SINGLETONS = ("meta", "index", "plan", "kpi", "maintenance")
 COLLECTIONS = ("tracks", "trains", "operations", "resources", "incidents", "conflicts", "recommendations",
                "requests", "alerts", "switches")
 

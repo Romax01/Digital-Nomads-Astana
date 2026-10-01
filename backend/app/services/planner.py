@@ -516,11 +516,22 @@ class PlanBuilder:
             o0 = rest[0].op
             train = m.trains.get(o0.train_id) if o0.train_id else None
             first_stay = self.stays[rest[0].stay]
-            standing = first_stay["fixed"]
+            fixed_ops = [ci for ci in chain if ci.fixed]
+            on_station = train is not None and train.status == "on_station" and train.current_track_id
+            standing = bool(first_stay["fixed"] or fixed_ops or on_station)
+            src = None
+            if standing:
+                if fixed_ops and fixed_ops[-1].op.kind in ("arrival", "shunting"):
+                    src = fixed_ops[-1].op.track_id
+                elif on_station:
+                    src = train.current_track_id
+                elif rest[0].op.kind == "shunting" and rest[0].op.from_track_id:
+                    src = rest[0].op.from_track_id
+                else:
+                    src = first_stay["track0"]
             steps = []
             if standing:
-                steps.append({"kind": "dwell", "duration": 0, "requires": [],
-                              "group": m.track_rows[first_stay["track0"]].kind})
+                steps.append({"kind": "dwell", "duration": 0, "requires": [], "group": m.track_rows[src].kind})
             for ci in rest:
                 st = {"kind": ci.op.kind, "duration": ci.dur, "requires": list(ci.op.requirements or [])}
                 if ci.op.kind in ("arrival", "shunting") or (not steps):
@@ -533,7 +544,7 @@ class PlanBuilder:
             if prev_end is not None:
                 start_after = max(start_after, prev_end)
             if standing:
-                start_after = max(0, prev_end or 0)
+                start_after = max(0, prev_end or 0)  # стоянка на текущем пути — с момента окончания начатой операции
             spec = TrainSpec(train_id=train.id if train else o0.id, number=train.number if train else (o0.note or ""),
                              kind=train.kind if train else "freight", priority=train.priority if train else 1,
                              length_m=m.train_length(train) if train else 20.0,
@@ -542,7 +553,9 @@ class PlanBuilder:
                              template=steps, arrival=_dt(m, start_after),
                              departure_not_before=aware(train.scheduled_departure) if train and train.scheduled_departure else None)
             placer = Placer(m, book, wait_max_min=600)
-            if standing or rest[0].op.kind not in ("arrival", "shunting"):
+            if standing:
+                placer.force_first = src
+            elif rest[0].op.kind not in ("arrival", "shunting"):
                 placer.force_first = first_stay["track0"]
             pr = placer.place(spec, arrival_exact=False)
             if not pr.ok:
@@ -567,8 +580,11 @@ class PlanBuilder:
 
 
 # ---------------------------------------------------------------------- проверка и сводка
-def verify(model: StationModel, schedule: dict) -> list[str]:
-    """Независимая проверка плана: все резервы плана не пересекаются друг с другом и с блокировками."""
+def verify(model: StationModel, schedule: dict, unresolved_tracks: set | None = None) -> list[str]:
+    """Независимая проверка плана: все резервы плана не пересекаются друг с другом и с блокировками.
+    unresolved_tracks — пути стоянок, которые планировщик честно отметил как нерешаемые (нет
+    допустимой альтернативы); блокировка «нет данных» на них сообщается отдельно, а не отклоняет план."""
+    unresolved_tracks = unresolved_tracks or set()
     book = IntervalBook()
     model.add_blocks(book, include_data_blocks=True)
     errors = []
@@ -594,7 +610,7 @@ def verify(model: StationModel, schedule: dict) -> list[str]:
             hits = book.conflicts(sp["key"], sp["start"], sp["end"])
             for h in hits:
                 if h.meta.get("type") == "reservation" or not fixed:
-                    if h.meta.get("type") == "data" and fixed:
+                    if h.meta.get("type") == "data" and (fixed or sp["key"][6:] in unresolved_tracks):
                         continue
                     if h.meta.get("type") == "shift" and fixed:
                         continue
@@ -616,8 +632,9 @@ def run_planner(model: StationModel, *, time_limit: float | None = None, trigger
     pb = PlanBuilder(model, fc_before)
     res = pb.solve_cpsat(time_limit or s.planner_time_limit_s, s.planner_workers)
     notes = []
+    unresolved_tracks = {u["track_id"] for u in pb.unresolved if u.get("track_id")}
     if res.status in ("optimal", "feasible"):
-        errs = verify(model, res.schedule)
+        errs = verify(model, res.schedule, unresolved_tracks)
         if errs:
             notes.append("Решение CP-SAT не прошло независимую проверку и отклонено: " + "; ".join(errs[:3]))
             log.warning("CP-SAT verify failed: %s", errs[:5])
@@ -629,7 +646,7 @@ def run_planner(model: StationModel, *, time_limit: float | None = None, trigger
     if res is None:
         pb2 = PlanBuilder(model, fc_before)
         res = pb2.solve_greedy()
-        errs = verify(model, {k: v for k, v in res.schedule.items() if not v.get("kept")})
+        errs = verify(model, {k: v for k, v in res.schedule.items() if not v.get("kept")}, unresolved_tracks)
         if errs:
             notes.append("Эвристика: часть плана не прошла проверку — " + "; ".join(errs[:3]))
             res.status = "partial"

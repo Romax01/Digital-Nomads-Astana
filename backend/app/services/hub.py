@@ -114,6 +114,11 @@ class Hub:
                 await self.broadcast(m)
 
     def step(self, advance: bool) -> list[dict]:
+        from app.core.runtime_lock import world_lock
+        with world_lock:
+            return self._step(advance)
+
+    def _step(self, advance: bool) -> list[dict]:
         s = get_settings()
         if s.engine_enabled:
             self.engine.step(advance)
@@ -306,12 +311,21 @@ class Replanner:
                 log.exception("Ошибка автоматического перепланирования")
 
     def run_once(self, reason: str, force: bool = False) -> dict | None:
+        from app.core.runtime_lock import world_lock
+        with world_lock:
+            return self._run_once(reason, force)
+
+    def _run_once(self, reason: str, force: bool = False) -> dict | None:
         from app.services.conflicts import detect
         from app.services.planner import run_planner
         with SessionLocal() as db:
             if db.execute(select(Station).where(Station.kind == "main")).first() is None:
                 return None
             model = StationModel(db)
+            missing = sum(1 for ds in model.data_states.values() if ds["state"] == "missing")
+            if not force and model.data_states and missing > len(model.data_states) / 2:
+                log.info("Перепланирование отложено: нет данных датчиков по %d путям", missing)
+                return None
             det = detect(model)
             relevant = [c for c in det["conflicts"] if c["type"] in RESOLVABLE]
             if not relevant and not force:
