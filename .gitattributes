@@ -1,4 +1,4 @@
-* text=auto eol=lf
-*.png binary
-*.ttf binary
-*.pdf binary
+# переносы строк не зависят от настроек git на другом ПК
+*.sh text eol=lf
+mosquitto/* text eol=lf
+*.bat text eol=crlf
