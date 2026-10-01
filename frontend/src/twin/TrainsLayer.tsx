@@ -188,7 +188,9 @@ export function TrainsLayer({ topo, st }: { topo: Topology; st: ViewState }) {
       const selected = selection?.type === "train" && selection.id === id;
       out.push({
         id: `train:${id}`, text: `№ ${t.number}${t.faulty_wagons.length ? " ⚠" : ""}${t.delay_min >= 5 ? ` +${t.delay_min}′` : ""}`,
-        sub: `${t.wagons} ваг.${mode === "forecast" ? " · прогноз" : t.pos?.moving ? ` · ${t.current_op?.label?.toLowerCase() ?? "движение"}` : t.pos?.waiting ? " · ожидает приёма" : ""}`,
+        sub: `${t.wagons} ваг.${mode === "forecast" ? " · прогноз" : t.pos?.moving ? ` · ${t.current_op?.label?.toLowerCase() ?? "движение"}` : t.pos?.waiting ? " · ожидает приёма" : ""}` +
+          ((t.defects ?? []).some((d) => d.restriction) ? " · ⛔ ждёт решения по сообщению о дефекте"
+            : (t.defects ?? []).some((d) => d.fault_open && d.in_train) ? " · ⛔ неисправный вагон" : ""),
         priority: selected ? 100 : t.conflict_ids.length ? 85 : t.pos?.moving ? 70 : 55,
         cls: `train k-${t.kind}${selected ? " sel" : ""}${t.conflict_ids.length ? " bad" : ""}`,
         pos: () => heads.current[id] ?? null, onClick: () => select({ type: "train", id }),

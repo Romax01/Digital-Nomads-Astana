@@ -66,7 +66,7 @@ class Engine:
                     sim.model_time = aware(sim.model_time) + d
                     self.tick_model_dt = d
             now = aware(sim.model_time)
-            if real_time and advance and sim.running:
+            if advance and sim.running:  # скользящее расписание при любой скорости
                 from app.sim.seed import extend_timetable
                 added = extend_timetable(db, sim, now)
                 if added:

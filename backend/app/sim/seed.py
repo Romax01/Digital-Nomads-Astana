@@ -455,6 +455,8 @@ def reset_world(db: Session, config_name: str, scenario: str, seed: int, real_ti
     sim.scenario, sim.station_config = scenario, config_name
     sim.plan_state_version = (sim.plan_state_version or 0) + 1
     sim.world, sim.scheduled_events = {"device_faults": {}}, []
+    # скользящее расписание: конец исходного расписания (пополнение — extend_timetable)
+    sim.world = {**sim.world, "tt_until": (t0 + timedelta(hours=cfg.get("timetable", {}).get("span_h", 10) - 2.5)).isoformat()}
     if real_time:
         tt = cfg.get("timetable", {})
         # реальное время: ×1 по часам сервера, расписание пополняется (extend_timetable)
@@ -476,6 +478,10 @@ def reset_world(db: Session, config_name: str, scenario: str, seed: int, real_ti
         optimize_initial_plan(db)
     _CURRENT_DAY = None
     return sim
+
+
+def aware_dt(d: datetime) -> datetime:
+    return d if d.tzinfo else d.replace(tzinfo=UTC)
 
 
 def _extend_shifts(db: Session, cfg: dict, need_until: datetime):
@@ -502,13 +508,22 @@ def _extend_shifts(db: Session, cfg: dict, need_until: datetime):
 
 
 def extend_timetable(db: Session, sim: SimState, now: datetime) -> int:
-    """Реальное время: когда до конца расписания меньше окна, добавляются поезда на следующее
-    окно (REALTIME_WINDOW_H) с размещением по текущим резервам — новые поезда не создают
-    двойных бронирований. Возвращает число добавленных поездов."""
-    w = sim.world or {}
-    if not w.get("real_time") or not w.get("tt_until"):
+    """Скользящее расписание (любая скорость симуляции и реальное время): когда до конца
+    расписания меньше окна, добавляются поезда на следующее окно (REALTIME_WINDOW_H) с размещением
+    по текущим резервам — новые поезда не создают двойных бронирований. Если модель ушла далеко
+    вперёд (большая скорость, долгая работа), окно начинается от текущего момента: поезда в
+    прошлом не создаются. Фикстуры демонстрации (demo_*) не пополняются. Возвращает число поездов."""
+    from sqlalchemy import func
+    if (sim.scenario or "").startswith("demo_"):
         return 0
-    until = datetime.fromisoformat(w["tt_until"])
+    w = sim.world or {}
+    if w.get("tt_until"):
+        until = datetime.fromisoformat(w["tt_until"])
+    else:  # мир создан до появления скользящего расписания — конец по последнему прибытию
+        last = db.execute(select(func.max(Train.scheduled_arrival))).scalar()
+        until = aware_dt(last) if last else now
+    if until < now + timedelta(minutes=30):
+        until = now + timedelta(minutes=30)  # первые поезда — не раньше чем через 30 мин (подход по перегону)
     if until - now > timedelta(hours=REALTIME_WINDOW_H):
         return 0
     cfg = load_config(sim.station_config)

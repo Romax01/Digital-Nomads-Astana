@@ -74,3 +74,26 @@ def test_pause_or_speed_leaves_real_time(client, auth):
     with SessionLocal() as db:
         s = db.get(SimState, 1)
         assert not s.running and not s.world.get("real_time")
+
+
+def test_rolling_timetable_without_real_time_after_long_run(world):
+    """Обычная симуляция (любая скорость): после конца исходного расписания поезда продолжают
+    появляться — в будущем от текущего момента, а не задним числом."""
+    world("normal")
+    from datetime import datetime
+    from app.sim.seed import extend_timetable
+    with SessionLocal() as db:
+        s = db.get(SimState, 1)
+        assert not s.world.get("real_time") and s.world.get("tt_until")
+        until = datetime.fromisoformat(s.world["tt_until"])
+        far = until + timedelta(days=1)          # модель ушла на сутки вперёд (×60 на ночь)
+        s.model_time = far
+        before = {t for (t,) in db.execute(select(Train.id))}
+        added = extend_timetable(db, s, far)
+        db.commit()
+        assert added > 0
+        new = db.execute(select(Train).where(Train.id.not_in(before))).scalars().all()
+        assert all(aware(t.scheduled_arrival) >= far for t in new)
+        assert all(t.status in ("scheduled", "approaching") for t in new)
+        # повторно в том же окне — без дублей
+        assert extend_timetable(db, db.get(SimState, 1), far) == 0
