@@ -592,6 +592,18 @@ def sim_state(db: Session = Depends(get_db), _: User = Depends(require("state.vi
                                                                 "small": "Небольшая станция (Шамалган, демо)"}}
 
 
+def _leave_real_time(s) -> bool:
+    """Пауза или смена скорости выводят из режима реального времени: модельное время больше не равно часам.
+    Вернуться в реальное время — сброс с флагом real_time."""
+    w = dict(s.world or {})
+    if not w.pop("real_time", None):
+        return False
+    from sqlalchemy.orm.attributes import flag_modified
+    s.world = w
+    flag_modified(s, "world")
+    return True
+
+
 def _sim_audit(db, user, action, summary):
     s = db.get(SimState, 1)
     audit(db, user, action, "simulation", "1", summary, model_time=aware(s.model_time))
@@ -610,6 +622,7 @@ def sim_start(db: Session = Depends(get_db), user: User = Depends(require("sim.c
 def sim_pause(db: Session = Depends(get_db), user: User = Depends(require("sim.control"))):
     s = db.get(SimState, 1, with_for_update=True)
     s.running = False
+    _leave_real_time(s)
     _sim_audit(db, user, "sim.pause", "Симуляция на паузе")
     db.commit()
     return {"running": False}
@@ -619,7 +632,8 @@ def sim_pause(db: Session = Depends(get_db), user: User = Depends(require("sim.c
 def sim_speed(body: S.SpeedIn, db: Session = Depends(get_db), user: User = Depends(require("sim.control"))):
     s = db.get(SimState, 1, with_for_update=True)
     s.speed = body.speed
-    _sim_audit(db, user, "sim.speed", f"Скорость симуляции ×{body.speed:g}")
+    was_rt = _leave_real_time(s)
+    _sim_audit(db, user, "sim.speed", f"Скорость симуляции ×{body.speed:g}" + (" (режим реального времени выключен)" if was_rt else ""))
     db.commit()
     return {"speed": s.speed}
 
@@ -638,9 +652,9 @@ def sim_reset(body: S.ResetIn, db: Session = Depends(get_db), user: User = Depen
     with world_lock:
         for attempt in range(3):
             try:
-                reset_world(db, cfg, body.scenario, body.seed)
+                reset_world(db, cfg, body.scenario, body.seed, real_time=body.real_time)
                 _sim_audit(db, user, "sim.reset", f"Сброс симуляции: сценарий «{SCENARIOS[body.scenario]['title']}», "
-                                                  f"seed {body.seed}, конфигурация {cfg}")
+                                                  f"seed {body.seed}, конфигурация {cfg}" + (", реальное время" if body.real_time else ""))
                 db.commit()
                 break
             except OperationalError:
@@ -651,7 +665,7 @@ def sim_reset(body: S.ResetIn, db: Session = Depends(get_db), user: User = Depen
         hub.reset_state()
     from app.core import bus
     bus.publish("plan_state_changed", {"reason": "reset"})
-    return {"scenario": body.scenario, "seed": body.seed, "station_config": cfg}
+    return {"scenario": body.scenario, "seed": body.seed, "station_config": cfg, "real_time": body.real_time}
 
 
 @router.get("/sim/world", tags=["Симуляция"], include_in_schema=False)

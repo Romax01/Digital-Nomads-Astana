@@ -41,7 +41,7 @@ export default function Header() {
         <small>модельное время · {tzLabel()}</small>
       </div>
       <div className="hdr-block">
-        <span><b>{meta ? (meta.running ? `▶ Симуляция ×${meta.speed}` : "⏸ Пауза") : "—"}</b></span>
+        <span><b title={meta?.real_time_mode ? "Модельное время идёт по часам сервера (×1)" : undefined}>{meta ? (meta.real_time_mode && meta.running ? "● Реальное время" : meta.running ? `▶ Симуляция ×${meta.speed}` : "⏸ Пауза") : "—"}</b></span>
         <small title="Сценарий симуляции">{meta?.scenario_title ?? ""}</small>
       </div>
       <div className="seg" role="group" aria-label="Режим просмотра">

@@ -4,7 +4,7 @@
 
 | Набор | Где | Результат |
 |---|---|---|
-| Backend: интеграционные тесты | `backend/tests/` на реальной PostgreSQL (`station_test`, миграции Alembic) | **58 из 58 прошли** (~82 с) |
+| Backend: интеграционные тесты | `backend/tests/` на реальной PostgreSQL (`station_test`, миграции Alembic) | **61 из 61 прошёл** (~105 с) |
 | Сквозной сценарий `docs/demo.md` на запущенном стенде | `tools/demo_e2e.py` (через API, как интерфейс) | **0 ошибок** (≈ 50 проверок: шаги 1–6) |
 | Frontend: unit-тесты | `frontend/src/lib/reducer.test.ts`, `frontend/src/twin/geometry.test.ts` (vitest) | **12 из 12 прошли** |
 | Frontend: проверка типов и сборка | `tsc -b`, `vite build` | **без ошибок** |

@@ -69,6 +69,7 @@ class ResetIn(BaseModel):
     scenario: str = Field(default="normal")
     seed: int = Field(default=42, ge=0, le=10 ** 9)
     station_config: Literal["large", "small"] | None = None
+    real_time: bool = Field(default=False, description="Реальное время: старт от текущего момента, ход ×1 по часам сервера")
 
 
 class IndexConfigIn(BaseModel):

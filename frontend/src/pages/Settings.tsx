@@ -15,6 +15,7 @@ export default function Settings() {
   const cfgAdmin = can(user, "config.manage") ? null : "Изменение конфигурации — роль «Администратор».";
   const [scenario, setScenario] = useState("normal");
   const [seed, setSeed] = useState(42);
+  const [realTime, setRealTime] = useState(true);
   const [config, setConfig] = useState("large");
   useEffect(() => { if (sim.data) { setScenario(sim.data.scenario); setSeed(sim.data.seed); setConfig(sim.data.station_config); } }, [sim.data?.scenario]);
   const post = async (url: string, body?: any, ok?: string) => {
@@ -37,11 +38,13 @@ export default function Settings() {
               <label className="f">Сценарий<select value={scenario} onChange={(e) => setScenario(e.target.value)}>
                 {Object.entries(sim.data.scenarios).map(([k, v]: any) => <option key={k} value={k}>{v.title}</option>)}</select></label>
               <label className="f">Seed<input type="number" value={seed} onChange={(e) => setSeed(+e.target.value)} /></label>
+              <label className="row" title="Старт от текущего момента, модельное время идёт ×1 по часам сервера; расписание пополняется автоматически. Пауза или смена скорости выключают режим.">
+                <input type="checkbox" checked={realTime} onChange={(e) => setRealTime(e.target.checked)} /> Реальное время</label>
               <label className="f">Станция<select value={config} onChange={(e) => setConfig(e.target.value)}>
                 {Object.entries(sim.data.configs).map(([k, v]: any) => <option key={k} value={k}>{v}</option>)}</select></label>
             </div>
             <p className="muted" style={{ margin: 0 }}>{sim.data.scenarios[scenario]?.description}</p>
-            <div><ActionButton kind="primary" disabledReason={admin} onClick={() => post("/api/v1/sim/reset", { scenario, seed, station_config: config }, "Сценарий загружен: начальное состояние воспроизведено")}>Сбросить и загрузить сценарий</ActionButton></div>
+            <div><ActionButton kind="primary" disabledReason={admin} onClick={() => post("/api/v1/sim/reset", { scenario, seed, station_config: config, real_time: realTime }, realTime ? "Сценарий загружен в реальном времени" : "Сценарий загружен: начальное состояние воспроизведено")}>Сбросить и загрузить сценарий</ActionButton></div>
             {sim.data.scheduled_events?.length > 0 && <div><h4>Запланированные события сценария</h4><ul>{sim.data.scheduled_events.map((e: any, i: number) =>
               <li key={i}>{fmtHM(e.at)} — {e.type === "incident" ? `инцидент ${e.kind}` : e.type === "device_fault" ? `неисправность устройства ${e.device_id} (${e.duration_s} с)` : e.key} {e.fired ? <Badge cls="ok">выполнено</Badge> : <Badge cls="muted">ожидает</Badge>}</li>)}</ul></div>}
           </>}

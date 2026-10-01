@@ -260,6 +260,7 @@ def build_view(db: Session, model: StationModel, engine_waiting: dict, index: di
         "meta": {"model_time": iso(now), "real_time": iso(utcnow()), "speed": sim.speed, "running": sim.running,
                  "scenario": sim.scenario, "scenario_title": SCENARIOS.get(sim.scenario, {}).get("title", sim.scenario),
                  "station_config": sim.station_config, "state_version": model.version, "seed": sim.seed,
+                 "real_time_mode": bool((sim.world or {}).get("real_time")),
                  "station_id": model.sid, "station_name": model.station.name, "timezone": model.station.timezone,
                  "is_demo": True},
         "tracks": tracks, "trains": trains, "operations": operations, "resources": resources,

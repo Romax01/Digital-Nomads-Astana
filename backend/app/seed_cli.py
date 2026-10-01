@@ -23,11 +23,13 @@ def main():
         if a.if_empty and db.execute(select(Station)).first():
             print("Демо-данные уже есть — пропуск.")
             return
-        sim = reset_world(db, a.config or s.station_config, a.scenario, a.seed if a.seed is not None else s.sim_seed)
-        if s.sim_autostart:
+        sim = reset_world(db, a.config or s.station_config, a.scenario, a.seed if a.seed is not None else s.sim_seed,
+                          real_time=s.sim_real_time)
+        if s.sim_autostart and not s.sim_real_time:
             sim.running = True
             sim.speed = 5.0
-        print(f"Демо-данные созданы: конфигурация {sim.station_config}, сценарий {sim.scenario}, seed {sim.seed}")
+        print(f"Демо-данные созданы: конфигурация {sim.station_config}, сценарий {sim.scenario}, seed {sim.seed}"
+              + (", реальное время" if s.sim_real_time else ""))
 
 
 if __name__ == "__main__":

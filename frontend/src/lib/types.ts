@@ -5,7 +5,7 @@ export type Dict<T> = Record<string, T>;
 export interface Meta {
   model_time: string; real_time: string; speed: number; running: boolean; scenario: string; scenario_title: string;
   station_config: string; state_version: number; seed: number; station_id: string; station_name: string;
-  timezone: string; is_demo: boolean;
+  timezone: string; is_demo: boolean; real_time_mode?: boolean;
 }
 
 export interface TrackState {

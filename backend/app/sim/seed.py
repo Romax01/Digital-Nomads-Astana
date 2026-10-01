@@ -61,13 +61,28 @@ DEFAULT_INDEX_CONFIG = {
 }
 
 
-def start_time(cfg: dict) -> datetime:
+REALTIME_WINDOW_H = 4.0  # реальное время: расписание пополняется окнами по 4 ч
+_CURRENT_DAY: datetime | None = None  # «день сценария» текущего сброса (реальное время)
+
+
+def start_time(cfg: dict, real_time: bool = False) -> datetime:
+    """Начало модели. Демо — фиксированные сутки (воспроизводимо); реальное время — текущий момент."""
+    if real_time:
+        return utcnow().replace(second=0, microsecond=0)
     tzi = ZoneInfo(cfg["station"].get("timezone", "Asia/Almaty"))
     base = datetime.fromisoformat(SIM_DATE).replace(tzinfo=tzi)
     return (base + timedelta(hours=SIM_START_LOCAL_H)).astimezone(UTC)
 
 
-def local_day(cfg) -> datetime:
+def local_day(cfg, sim=None) -> datetime:
+    """Опорные «сутки» сценария: события задаются часами от их начала.
+    В реальном времени сутки сдвинуты так, что 12:00 сценария = момент запуска: сценарии
+    сохраняют свои интервалы относительно старта."""
+    iso = ((sim.world or {}).get("sim_day") if sim is not None else None)
+    if iso:
+        return datetime.fromisoformat(iso)
+    if _CURRENT_DAY is not None:
+        return _CURRENT_DAY
     tzi = ZoneInfo(cfg["station"].get("timezone", "Asia/Almaty"))
     return datetime.fromisoformat(SIM_DATE).replace(tzinfo=tzi)
 
@@ -148,7 +163,8 @@ def seed_static(db: Session, cfg: dict, rnd: random.Random, t0: datetime):
                             category=r["category"], unit=r["unit"], period=r["period"], source=r["source"],
                             rule_text=r["rule"], value=r.get("value"), policy=r.get("policy", "hard"), active=True))
     pl = cfg["plan"]
-    db.add(Plan(id=f"{sid}-PLAN-{SIM_DATE[:7]}", station_id=sid, month=SIM_DATE[:7],
+    month = t0.astimezone(ZoneInfo(cfg["station"].get("timezone", "Asia/Almaty"))).strftime("%Y-%m")
+    db.add(Plan(id=f"{sid}-PLAN-{month}", station_id=sid, month=month,
                 target_wagons=pl["month_target_wagons"], actual_base_wagons=pl["actual_base_wagons"],
                 policy=pl.get("policy", "soft")))
     seed_devices(db, cfg, topo)
@@ -195,13 +211,24 @@ WAGON_LEN = {"gondola": 13.92, "covered": 17.64, "tank": 12.02, "flat": 14.62, "
 
 
 class TimetableBuilder:
-    def __init__(self, db: Session, cfg: dict, rnd: random.Random, t0: datetime):
+    def __init__(self, db: Session, cfg: dict, rnd: random.Random, t0: datetime, include_existing: bool = False):
         self.db, self.cfg, self.rnd, self.t0 = db, cfg, rnd, t0
-        self.model = StationModel(db, with_reservations=False, data_states={})
-        self.book = self.model.build_book(include_reservations=False, include_data_blocks=False)
+        self.model = StationModel(db, with_reservations=include_existing, data_states={})
+        self.book = self.model.build_book(include_reservations=include_existing, include_data_blocks=False)
         self.trains: list[tuple[Train, list[Operation]]] = []
         self.counter = {"transit": 2001, "transfer_in": 3001, "cargo": 2501, "passenger": 101}
         self.wagon_no = 50000000 + rnd.randint(0, 999) * 1000
+        if include_existing:
+            # продолжение расписания: номера поездов и вагонов не повторяются
+            from sqlalchemy import func
+            nums = [int(n) for (n,) in db.execute(select(Train.number)) if str(n).isdigit()]
+            for tpl, (lo, hi) in {"transit": (2001, 2499), "cargo": (2501, 2999), "transfer_in": (3001, 3999),
+                                  "passenger": (101, 199)}.items():
+                used = [n for n in nums if lo <= n <= hi]
+                self.counter[tpl] = (max(used) + (1 if tpl == "passenger" else 2)) if used else lo
+            wmax = db.execute(select(func.max(Wagon.number))).scalar()
+            if wmax and str(wmax).isdigit():
+                self.wagon_no = max(self.wagon_no, int(wmax) + 1)
 
     def _wagons(self, n: int, kinds: list[str]) -> list[Wagon]:
         out = []
@@ -232,6 +259,9 @@ class TimetableBuilder:
         num = number or str(self.counter[tpl])
         if not number:
             self.counter[tpl] += 2 if tpl != "passenger" else 1
+            while self.db.get(Train, f"TR-{num}") is not None:  # номер занят (длительная работа)
+                num = str(self.counter[tpl])
+                self.counter[tpl] += 2 if tpl != "passenger" else 1
         dep_nb = None
         if tpl in ("transit", "cargo", "passenger"):
             proc = sum(s["duration"] for s in steps if s["kind"] != "departure")
@@ -322,7 +352,7 @@ class TimetableBuilder:
             create_from_ops(self.db, self.model, train.id, train.number, ops)
 
 
-def reset_world(db: Session, config_name: str, scenario: str, seed: int):
+def reset_world(db: Session, config_name: str, scenario: str, seed: int, real_time: bool = False):
     from app.sim.scenarios import SCENARIOS, apply_scenario
     if scenario not in SCENARIOS:
         raise ValueError(f"Неизвестный сценарий {scenario}")
@@ -331,7 +361,10 @@ def reset_world(db: Session, config_name: str, scenario: str, seed: int):
     wipe(db)
     ensure_users(db)
     ensure_index_config(db)
-    t0 = start_time(cfg)
+    global _CURRENT_DAY
+    t0 = start_time(cfg, real_time)
+    tzi = ZoneInfo(cfg["station"].get("timezone", "Asia/Almaty"))
+    _CURRENT_DAY = (t0 - timedelta(hours=SIM_START_LOCAL_H)).astimezone(tzi) if real_time else None
     sim = db.get(SimState, 1)
     if sim is None:
         sim = SimState(id=1, model_time=t0)
@@ -340,6 +373,12 @@ def reset_world(db: Session, config_name: str, scenario: str, seed: int):
     sim.scenario, sim.station_config = scenario, config_name
     sim.plan_state_version = (sim.plan_state_version or 0) + 1
     sim.world, sim.scheduled_events = {"device_faults": {}}, []
+    if real_time:
+        tt = cfg.get("timetable", {})
+        # реальное время: ×1 по часам сервера, расписание пополняется (extend_timetable)
+        sim.world = {"device_faults": {}, "real_time": True, "sim_day": _CURRENT_DAY.isoformat(),
+                     "tt_until": (t0 + timedelta(hours=tt.get("span_h", 10) - 2.5)).isoformat()}
+        sim.speed, sim.running = 1.0, True
     db.flush()
     seed_static(db, cfg, rnd, t0)
     tb = TimetableBuilder(db, cfg, rnd, t0)
@@ -348,7 +387,61 @@ def reset_world(db: Session, config_name: str, scenario: str, seed: int):
     from app.config import get_settings
     if get_settings().seed_optimize and not scenario.startswith("demo_"):
         optimize_initial_plan(db)
+    _CURRENT_DAY = None
     return sim
+
+
+def _extend_shifts(db: Session, cfg: dict, need_until: datetime):
+    """Смены бригад и ресурсов продлеваются по суткам вперёд (реальное время работает дольше суток)."""
+    from sqlalchemy import func
+    tzi = ZoneInfo(cfg["station"].get("timezone", "Asia/Almaty"))
+    shifts = cfg.get("shifts", {})
+    for r in cfg["resources"]:
+        if not r.get("shift") or r["shift"] not in shifts:
+            continue
+        a, b = shifts[r["shift"]]
+        row = db.execute(select(ResourceShift.start_at, ResourceShift.end_at).where(ResourceShift.resource_id == r["id"])
+                         .order_by(ResourceShift.start_at.desc()).limit(1)).first()
+        if row is None:
+            continue
+        last = row[1]
+        # сутки начала последней смены (ночная смена заканчивается на следующие сутки)
+        day = (row[0].astimezone(tzi) - timedelta(hours=a)).replace(hour=0, minute=0, second=0, microsecond=0)
+        while last < need_until:
+            day += timedelta(days=1)
+            st_, en_ = day + timedelta(hours=a), day + timedelta(hours=b)
+            db.add(ResourceShift(resource_id=r["id"], start_at=st_.astimezone(UTC), end_at=en_.astimezone(UTC)))
+            last = en_.astimezone(UTC)
+
+
+def extend_timetable(db: Session, sim: SimState, now: datetime) -> int:
+    """Реальное время: когда до конца расписания меньше окна, добавляются поезда на следующее
+    окно (REALTIME_WINDOW_H) с размещением по текущим резервам — новые поезда не создают
+    двойных бронирований. Возвращает число добавленных поездов."""
+    w = sim.world or {}
+    if not w.get("real_time") or not w.get("tt_until"):
+        return 0
+    until = datetime.fromisoformat(w["tt_until"])
+    if until - now > timedelta(hours=REALTIME_WINDOW_H):
+        return 0
+    cfg = load_config(sim.station_config)
+    tt = cfg.get("timetable", {})
+    span = tt.get("span_h", 10)
+    rnd = random.Random(sim.seed * 100003 + int(until.timestamp()) // 60)
+    tb = TimetableBuilder(db, cfg, rnd, until, include_existing=True)
+    for tpl in ("passenger", "transit", "transfer_in", "cargo"):
+        rate = tt.get(tpl, 0) * REALTIME_WINDOW_H / span
+        n = int(rate) + (1 if rnd.random() < rate - int(rate) else 0)
+        for _ in range(n):
+            arr = until + timedelta(hours=rnd.uniform(0, REALTIME_WINDOW_H))
+            tb.add(tpl, arr.replace(second=0, microsecond=0))
+    tb.t0 = now
+    tb.finalize()
+    _extend_shifts(db, cfg, until + timedelta(hours=REALTIME_WINDOW_H + 24))
+    sim.world = {**w, "tt_until": (until + timedelta(hours=REALTIME_WINDOW_H)).isoformat()}
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(sim, "world")
+    return len(tb.trains)
 
 
 def optimize_initial_plan(db: Session) -> int:

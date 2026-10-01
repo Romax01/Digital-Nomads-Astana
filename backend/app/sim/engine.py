@@ -54,11 +54,25 @@ class Engine:
             sim = db.get(SimState, 1, with_for_update=True)
             changed = False
             self.plan_flag = False
+            real_time = bool((sim.world or {}).get("real_time"))
             if advance and sim.running:
-                d = timedelta(seconds=dt_real * sim.speed)
-                sim.model_time = aware(sim.model_time) + d
-                self.tick_model_dt = d
+                if real_time:
+                    # реальное время: модельное время = часы сервера (без накопления ошибки тиков)
+                    prev = aware(sim.model_time)
+                    sim.model_time = max(prev, utcnow())
+                    self.tick_model_dt = sim.model_time - prev
+                else:
+                    d = timedelta(seconds=dt_real * sim.speed)
+                    sim.model_time = aware(sim.model_time) + d
+                    self.tick_model_dt = d
             now = aware(sim.model_time)
+            if real_time and advance and sim.running:
+                from app.sim.seed import extend_timetable
+                added = extend_timetable(db, sim, now)
+                if added:
+                    domain_event(db, "timetable.extended", f"Расписание продлено: добавлено поездов — {added}", model_time=now)
+                    db.flush()
+                    self.plan_flag = True
             plan_changed = self.fire_events(db, sim, now)
             plan_changed |= self.resolve_expired(db, now)
             db.flush()
@@ -144,7 +158,7 @@ class Engine:
             start = None
             if ev.get("start_local_h"):
                 from app.sim.seed import local_day
-                start = (local_day(model.cfg) + timedelta(hours=ev["start_local_h"])).astimezone(now.tzinfo)
+                start = (local_day(model.cfg, sim) + timedelta(hours=ev["start_local_h"])).astimezone(now.tzinfo)
             create_incident(db, None, kind, obj, duration_min=ev.get("duration_min"), extra_min=ev.get("extra_min"),
                             title=ev.get("title") or (ev.get("title_tpl") and f"{ev['title_tpl']}: {model.track_label(obj)}"),
                             start_at=start, description="Событие демонстрационного сценария")

@@ -5,18 +5,64 @@
 import { Grid, OrbitControls } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { fmtHMS } from "../lib/format";
 import { TRACK_STATUS } from "../lib/labels";
 import { useStore } from "../lib/store";
 import type { NetworkStatic, Topology, ViewState } from "../lib/types";
 import { CameraRig, fitGoal, type CamGoal } from "./CameraRig";
 import { pointAtExt, polyLen } from "./geometry";
-import { LabelCtx, LabelLayer, LabelRegistry } from "./labels";
+import { LabelCtx, LabelLayer, LabelRegistry, type LabelSpec } from "./labels";
 import { enu, NET_M, NetworkLevel, networkBounds, netTrainPoint, useNetTracks } from "./NetworkLevel";
 import { SCENE, STATUS_COLOR } from "./palette";
+import { BoundsClamp, KeyFly, MapBorder, StationBorder, type MapBox } from "./Navigation";
 import { StationLevel, STUB_U } from "./StationLevel";
 import { trainHeadPoint, TrainsLayer } from "./TrainsLayer";
+
+/** Ссылка на OrbitControls для команд извне Canvas (прерывание перелёта при полёте с клавиатуры). */
+const useThreeControls: { current: unknown } = { current: null };
+function ControlsRef() {
+  const { controls } = useThree();
+  useEffect(() => { useThreeControls.current = controls; }, [controls]);
+  return null;
+}
+
+/** Видимые границы: карта уровня и станции (на сети — между горловинами по оси станции). */
+function Borders({ isNet, box, topo, net }: { isNet: boolean; box: MapBox; topo: Topology | null; net: NetworkStatic | null }) {
+  const reg = useContext(LabelCtx);
+  useEffect(() => {
+    const specs: LabelSpec[] = [{ id: "border:map", text: isNet ? "Граница карты сети" : "Граница карты", priority: 12, cls: "zone",
+      pos: () => [box.min_x + (box.max_x - box.min_x) * 0.04, 3, box.min_z] }];
+    if (!isNet && topo?.layout) {
+      specs.push({ id: "border:station", text: `Граница станции «${topo.station.name}»`, sub: "между входными горловинами", priority: 20, cls: "zone",
+        pos: () => [topo.layout!.x_entry_west + 60, 3, topo.bounds.min_y - 30] });
+    }
+    reg?.replace("borders", specs);
+    return () => reg?.remove("borders");
+  }, [reg, isNet, box, topo]);
+  if (isNet) {
+    return (
+      <group>
+        <MapBorder box={box} y={7} dash={120} width={1.6} />
+        {net?.stations.map((s) => {
+          const [x, z] = enu([s.x_m, s.y_m]);
+          const len = (s.half_length_m * 2) / NET_M;
+          return <StationBorder key={s.id} x={x} z={z} angle={Math.atan2(-s.axis[1], s.axis[0])} len={Math.max(len * 1.25, 90)}
+            width={Math.max(len * 0.7, 60)} color={s.is_main ? SCENE.accent : "#3f8fb0"} dash={10} />;
+        })}
+      </group>
+    );
+  }
+  if (!topo) return null;
+  const xw = topo.layout?.x_entry_west ?? topo.bounds.min_x, xe = topo.layout?.x_entry_east ?? topo.bounds.max_x;
+  return (
+    <group>
+      <MapBorder box={box} y={0.6} dash={30} width={1.4} />
+      <MapBorder box={{ min_x: xw, max_x: xe, min_z: topo.bounds.min_y - 40, max_z: topo.bounds.max_y + 40 }} y={0.8}
+        color={SCENE.warn} dash={14} width={1.2} corner={30} />
+    </group>
+  );
+}
 
 /** Смена уровня без пересоздания canvas: стартовая позиция камеры и пределы отсечения. */
 function LevelSync({ level, far, near, start }: { level: string; far: number; near: number; start: () => CamGoal | null }) {
@@ -235,6 +281,13 @@ export default function TwinScene({ topo, st, net, netError }: { topo: Topology 
     const g = isNet ? (net ? networkGoal(net, aspect()) : null) : topo ? stationGoal(topo, aspect()) : null;
     return g ? g.position : [center.x, center.size * 0.5, center.z + center.size * 0.4];
   };
+  // границы карты уровня: камеру нельзя увести за них
+  const mapBox = useMemo<MapBox | null>(() => {
+    if (isNet && net) { const b = networkBounds(net); const m = 700; return { min_x: b.min_x - m, max_x: b.max_x + m, min_z: b.min_z - m, max_z: b.max_z + m }; }
+    if (!isNet && topo) { const b = topo.bounds; return { min_x: b.min_x - STUB_U - 120, max_x: b.max_x + STUB_U + 120, min_z: b.min_y - 160, max_z: b.max_y + 160 }; }
+    return null;
+  }, [isNet, net, topo]);
+  const stopFlight = () => { (useThreeControls.current as any)?.dispatchEvent?.({ type: "start" }); };
   const fogNear = isNet ? center.size * 1.3 : center.size * 0.7, fogFar = isNet ? center.size * 3.2 : center.size * 2.2;
 
   if (lostCtx) return (
@@ -266,11 +319,16 @@ export default function TwinScene({ topo, st, net, netError }: { topo: Topology 
           {isNet
             ? (net && <NetworkLevel net={net} topo={topo} st={st} />)
             : (topo && <><StationLevel topo={topo} st={st} net={net} /><TrainsLayer topo={topo} st={st} /></>)}
-          <OrbitControls makeDefault enableDamping dampingFactor={0.08} minPolarAngle={0.12} maxPolarAngle={1.42}
-            minDistance={isNet ? 20 : 12} maxDistance={center.size * 1.8} target={isNet || !topo ? [center.x, 0, center.z] : stationGoal(topo, aspect()).target} />
+          {mapBox && <Borders isNet={isNet} box={mapBox} topo={topo} net={net} />}
+          <OrbitControls makeDefault enableDamping dampingFactor={0.08} minPolarAngle={0.05} maxPolarAngle={1.45}
+            screenSpacePanning={false} zoomToCursor panSpeed={1.2} keyPanSpeed={0}
+            minDistance={isNet ? 20 : 12} maxDistance={center.size * 2.2} target={isNet || !topo ? [center.x, 0, center.z] : stationGoal(topo, aspect()).target} />
+          <ControlsRef />
           <LevelSync level={level} far={center.size * 4} near={isNet ? 25 : 1} start={startPose} />
           <CameraRig goal={goal.g} goalSeq={goal.seq} follow={follow} />
+          <KeyFly onUserMove={stopFlight} />
           <LabelLayer overlay={overlay} reg={reg} />
+          {mapBox && <BoundsClamp box={mapBox} minH={isNet ? 30 : 6} maxH={center.size * 2.2} />}
         </Canvas>
       </LabelCtx.Provider>
       <div className="tw-labels" ref={overlay} aria-hidden="false" />
@@ -279,7 +337,7 @@ export default function TwinScene({ topo, st, net, netError }: { topo: Topology 
         <div className="tw-hud tc">Поезд № {st.trains[followId]?.number ?? ""} не виден на этом уровне{isNet ? " (он на станции)" : " (он на перегоне)"}.
           <button className="btn small" onClick={() => useStore.getState().setCam(isNet ? "station" : "network")}>{isNet ? "К станции" : "К сети"}</button></div>
       )}
-      {!selection && <div className="tw-hud tr hint">Колесо — масштаб · левая кнопка — поворот · правая — перемещение · щелчок — карточка</div>}
+      {!selection && <div className="tw-hud tr hint">Полёт: W A S D / стрелки · Q / E — ниже / выше · Shift — быстрее · колесо — масштаб к курсору · левая кнопка — поворот · правая — перемещение по карте · щелчок — карточка</div>}
       {selection && <button className="tw-hud tr btn small" onClick={() => select(null)} title="Снять выбор (только просмотр, состояние не меняется)">Снять выбор ✕</button>}
     </div>
   );

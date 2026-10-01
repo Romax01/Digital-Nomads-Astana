@@ -52,6 +52,7 @@ services:
       MQTT_USER: ${MQTT_INGEST_USER:-ingest}
       MQTT_PASSWORD: ${MQTT_INGEST_PASSWORD:-ingest_dev_password}
       SIM_WORLD_TOKEN: ${SIM_WORLD_TOKEN:-sim_world_dev_token}
+      SIM_REAL_TIME: ${SIM_REAL_TIME:-true}
       SECRET_KEY: ${SECRET_KEY:-change_me_dev_secret}
       STATION_CONFIG: ${STATION_CONFIG:-large}
     depends_on:
