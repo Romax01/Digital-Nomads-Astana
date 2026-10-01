@@ -26,6 +26,34 @@ export interface TrainState {
   delay_min: number; waiting_reason?: string | null; current_op?: { id: string; kind: string; label: string } | null;
   next_op?: { id: string; kind: string; label: string; start: string } | null; faulty_wagons: string[];
   wagon_kinds: Dict<number>; pos: TrainPos | null; transfer_request_id?: string | null; conflict_ids: string[];
+  consist?: { loco_length_m: number; source: string; groups: { kind: string; length_m: number | null; count: number; loaded: boolean; faulty: boolean }[] };
+}
+
+/** Положение поезда на уровне «Сеть» (backend: view.py::network_view). */
+export interface NetTrain {
+  train_id: string; number: string; kind: string; wagons: number; length_m: number | null; delay_min: number;
+  phase: "at_origin" | "on_section" | "waiting_entry" | "at_station" | "arrived"; phase_label: string;
+  station_id?: string; section_id?: string; track_id?: string; track_no?: number; reverse?: boolean;
+  from?: string; to?: string; frac?: number; frac_rate?: number; frac_max?: number; eta?: string;
+}
+
+export interface NetworkLive {
+  source: string; trains: Dict<NetTrain>;
+  stations: Dict<{ id: string; trains_here: number; inbound: number; conflicts?: number; critical?: number;
+    free_rd_tracks?: number; rd_tracks?: number; restriction?: { title: string; until?: string | null } | null }>;
+}
+
+/** Статическая модель сети (GET /api/v1/network): метры ENU. */
+export interface NetworkStatic {
+  source: string; note: string; main_station_id: string;
+  projection: { type: string; lat0: number; lon0: number; units: string };
+  stations: { id: string; name: string; detail: "detailed" | "simplified"; is_main: boolean; lon: number; lat: number;
+    x_m: number; y_m: number; axis: number[]; axis_deg: number; half_length_m: number; throats: { west: number[]; east: number[] };
+    simplified?: { receiving_tracks?: number; max_train_length_m?: number; processing_min?: number; locomotives_available?: number; accepts?: string[]; travel_min?: number } }[];
+  sections: { id: string; name: string; from: string; to: string; from_throat: string; to_throat: string; tracks_count: number;
+    length_m: number; length_source: "data" | "geodesic"; max_speed_kmh?: number; physical_spacing_m?: number | null;
+    centerline: number[][]; geometry_length_m: number; source: string;
+    tracks: { id: string; no: number; vis_offset_m: number; direction: string; points: number[][] }[] }[];
 }
 
 export interface OperationState {
@@ -69,6 +97,7 @@ export interface ViewState {
   meta: Meta; tracks: Dict<TrackState>; trains: Dict<TrainState>; operations: Dict<OperationState>;
   resources: Dict<ResourceState>; incidents: Dict<any>; conflicts: Dict<Conflict>; recommendations: Dict<Recommendation>;
   requests: Dict<any>; alerts: Dict<Alert>; switches: Dict<any>; index: IndexState | null; plan: any; kpi: any;
+  network?: NetworkLive | null;
 }
 
 export interface Topology {
@@ -80,6 +109,8 @@ export interface Topology {
   parks: { id: string; name: string; kind: string }[];
   devices: { id: string; name: string; kind: string; object_id: string; x: number; y: number; source_mode: string }[];
   bounds: { min_x: number; max_x: number; min_y: number; max_y: number };
+  geometry?: { schema_scale_u_per_m: number; turnout_radius_u?: number; turnout_deg?: number };
+  layout?: { lane_gap: number; x_entry_west: number; x_entry_east: number };
 }
 
-export type Selection = { type: "track" | "train" | "resource" | "switch" | "operation" | "conflict" | "device" | "zone" | "incident"; id: string } | null;
+export type Selection = { type: "track" | "train" | "resource" | "switch" | "operation" | "conflict" | "device" | "zone" | "incident" | "station" | "section"; id: string } | null;

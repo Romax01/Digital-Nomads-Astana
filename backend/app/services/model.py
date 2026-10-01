@@ -121,7 +121,8 @@ class StationModel:
                        useful_length_m=t.useful_length_m, number=t.number) for t in self.track_rows.values()]
         conns = [dict(id=c.id, from_node=c.from_node, to_node=c.to_node, kind=c.kind, track_id=c.track_id,
                       length_m=c.length_m, points=c.points) for c in db.execute(select(TrackConnection)).scalars()]
-        self.topo = get_topology(self.sid, nodes, tracks, conns)
+        self.topo = get_topology(self.sid, nodes, tracks, conns,
+                                 (self.cfg.get("derived") or {}).get("schema_scale_u_per_m", 0.8))
         self.resources = {r.id: r for r in db.execute(select(Resource)).scalars()}
         self.shifts: dict[str, list[tuple[datetime, datetime]]] = {}
         for sh in db.execute(select(ResourceShift)).scalars():
@@ -362,11 +363,11 @@ def through_tracks(model, o: dict) -> list[str]:
 _TOPO_CACHE: dict = {}
 
 
-def get_topology(sid, nodes, tracks, conns) -> Topology:
-    key = (sid, len(nodes), len(tracks), len(conns))
+def get_topology(sid, nodes, tracks, conns, scale: float = 0.8) -> Topology:
+    key = (sid, len(nodes), len(tracks), len(conns), scale)
     if key not in _TOPO_CACHE:
         _TOPO_CACHE.clear()
-        _TOPO_CACHE[key] = Topology(sid, nodes, tracks, conns)
+        _TOPO_CACHE[key] = Topology(sid, nodes, tracks, conns, scale)
     return _TOPO_CACHE[key]
 
 

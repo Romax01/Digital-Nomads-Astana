@@ -65,7 +65,16 @@ function Shell() {
   useEffect(() => {
     if (!live) return;
     setTimezone(live.meta.timezone);
-    api.get("/api/v1/topology").then(setTopology).catch(() => setTopology(null));
+    // защита от поздних ответов: ответ для прежней станции/сценария не применяется
+    let actual = true;
+    const sid = live.meta.station_id;
+    setTopology(null);
+    useStore.getState().setNetwork(null);
+    api.get("/api/v1/topology").then((t) => { if (actual && t?.station?.id === sid) setTopology(t); }).catch(() => actual && setTopology(null));
+    api.get("/api/v1/network")
+      .then((n) => { if (actual && n?.main_station_id === sid) useStore.getState().setNetwork(n); })
+      .catch((e) => { if (actual) useStore.getState().setNetwork(null, e?.message || "Модель сети недоступна"); });
+    return () => { actual = false; };
   }, [stationKey]);
   return (
     <div className="app">

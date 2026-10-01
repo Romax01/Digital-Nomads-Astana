@@ -392,7 +392,10 @@ def save_plan(model: StationModel, res: dict, trigger: str, conflicts: list[dict
                 id=f"REC-{pv.id}", station_id=model.sid, kind="apply_plan",
                 title=f"Применить план № {pv.id}: изменить {len(res['changes'])} операций ({len(trains)} поезд.)",
                 reason=reason,
-                affected=[{"type": "train", "label": f"Поезд № {t}"} for t in trains] +
+                affected=[{"type": "train", "id": next((c["train_id"] for c in res["changes"] if c["train"] == t), None),
+                           "label": f"Поезд № {t}"} for t in trains] +
+                         [{"type": "track", "id": tid, "label": model.track_label(tid)}
+                          for tid in sorted({x for c in res["changes"] if c["track_changed"] for x in c.get("track_ids", [])})] +
                          [{"type": "conflict", "id": c["id"], "label": c["title"]} for c in conflicts[:5]],
                 action={"type": "apply_plan", "plan_id": pv.id},
                 effect={"conflicts_before": res["summary"]["conflicts_before"], "conflicts_after": sa["conflicts"],

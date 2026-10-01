@@ -4,9 +4,9 @@
 
 | Набор | Где | Результат |
 |---|---|---|
-| Backend: интеграционные тесты | `backend/tests/` на реальной PostgreSQL (`station_test`, миграции Alembic) | **47 из 47 прошли** (~90 с) |
+| Backend: интеграционные тесты | `backend/tests/` на реальной PostgreSQL (`station_test`, миграции Alembic) | **58 из 58 прошли** (~82 с) |
 | Сквозной сценарий `docs/demo.md` на запущенном стенде | `tools/demo_e2e.py` (через API, как интерфейс) | **0 ошибок** (≈ 50 проверок: шаги 1–6) |
-| Frontend: unit-тесты | `frontend/src/lib/reducer.test.ts` (vitest) | **5 из 5 прошли** |
+| Frontend: unit-тесты | `frontend/src/lib/reducer.test.ts`, `frontend/src/twin/geometry.test.ts` (vitest) | **12 из 12 прошли** |
 | Frontend: проверка типов и сборка | `tsc -b`, `vite build` | **без ошибок** |
 | Нагрузка и производительность | `tools/bench.py` | см. [performance.md](performance.md) |
 | Ручная проверка интерфейса | Chrome, 1564×784 | см. раздел ниже |
@@ -25,6 +25,12 @@ cd frontend && npm test && npm run build
 
 | Обязательная проверка | Тест(ы) |
 |---|---|
+| Маршруты через стрелочные переводы гладкие (излом < 6°) на большой и малой станции | `test_network.py::test_routes_are_smooth_through_turnouts` |
+| Изображение состава = длина × единый масштаб; прямая часть пути вмещает полезную длину | `test_network.py::test_train_body_uses_one_scale` |
+| Малая станция без сортировочного парка и депо | `test_network.py::test_small_station_keeps_its_topology` |
+| Проекция WGS-84 → метры (ошибка < 1 %), перегоны и их пути начинаются и заканчиваются в горловинах | `test_network.py::test_projection_matches_geodesic_distance`, `::test_sections_start_and_end_at_throats` |
+| Поезд не бывает одновременно на перегоне и на станции; состав по вагонам совпадает с числом вагонов | `test_network.py::test_train_is_never_on_section_and_station_at_once` |
+| Каждый вагон стоит тележками на ломаной рельсов, интерполяция не выходит за границу операции, подписи без наложений | `src/twin/geometry.test.ts` |
 | Правила месячного плана: цель и жёсткая квота | `test_rules.py::test_situation_1_plan_exceeded_soft_then_hard` |
 | Ситуация «пути заняты»: отказ, рассчитанное окно, альтернативы | `test_rules.py::test_situation_2_tracks_busy_rejected_with_computed_window` |
 | Ситуация «сейчас заполнено, к прибытию освободится» | `test_rules.py::test_situation_3_full_now_frees_before_arrival` |
@@ -76,7 +82,7 @@ cd frontend && npm test && npm run build
 
   Автоматического теста перезапуска брокера в наборе нет — это задача бэклога.
 - **Интерфейс в Chrome.**
-  - Вход по ролям, основной экран: KPI, 2D-схема, 3D-двойник, Гант, панели.
+  - Вход по ролям, основной экран: KPI, 3D-двойник (уровни «Станция» и «Сеть», «Открыть станцию», «Выбранный объект», «Следовать за поездом» при движении ×10), Гант, панели, «История», «Прогноз», малая станция. Скриншоты сняты headless Chrome (SwiftShader WebGL).
   - Заявки: проверка с отказом и окном 17:45, причины по путям, проверенная альтернатива, объяснения у недоступных кнопок.
   - Найденные дефекты исправлены: наложение подписей зон грузового района (2D и 3D), перекрытие нижнего пути легендой, повторное создание WebGL-контекста.
 - **Клавиатура.** Пути и составы на 2D-схеме, полосы на Ганте и строки таблиц доступны по Tab и выбираются Enter. У модальных окон есть фокус и закрытие по Esc.

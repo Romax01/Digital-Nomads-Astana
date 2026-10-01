@@ -27,7 +27,20 @@ export function ConflictsList({ st }: { st: ViewState }) {
   );
 }
 
+/** Идентификаторы объектов, затронутых рекомендацией (поезда, пути, объекты конфликтов) — из расчёта сервера. */
+export function affectedIds(st: ViewState, r: ViewState["recommendations"][string]): string[] {
+  const ids = new Set<string>();
+  for (const a of r.affected) {
+    if (a.id && (a.type === "train" || a.type === "track")) ids.add(a.id);
+    if (a.type === "conflict" && a.id && st.conflicts[a.id]) for (const o of st.conflicts[a.id].objects) ids.add(o.id);
+  }
+  for (const c of (r.effect?.changes ?? []) as any[]) { if (c.train_id) ids.add(c.train_id); for (const t of c.track_ids ?? []) ids.add(t); }
+  return [...ids];
+}
+
 export function RecommendationsList({ st }: { st: ViewState }) {
+  const hl = useStore((s) => s.highlight);
+  const setHl = useStore((s) => s.setHighlight);
   const user = useStore((s) => s.user);
   const mode = useStore((s) => s.mode);
   const nav = useNavigate();
@@ -67,6 +80,13 @@ export function RecommendationsList({ st }: { st: ViewState }) {
             <div className="faint">Затронуто: {r.affected.slice(0, 6).map((a) => a.label).join(", ")}</div>
             <div className="faint">Актуальность расчёта: {fmtHMS(r.computed_at)} (модельное), версия состояния {r.based_on_version}</div>
             <div className="row wrap">
+              <button className="btn small" aria-pressed={hl?.source === r.id} onClick={() => {
+                if (hl?.source === r.id) { setHl(null); return; }
+                const ids = affectedIds(st, r);
+                setHl({ ids, source: r.id });
+                const first = ids.find((i) => st.trains[i]) ?? ids.find((i) => st.tracks[i]);
+                if (first) { useStore.getState().select({ type: st.trains[first] ? "train" : "track", id: first }); useStore.getState().setCam("selected"); }
+              }}>{hl?.source === r.id ? "Снять подсветку" : "Показать на схеме"}</button>
               <button className="btn small" onClick={() => nav("/plan")}>Сравнить планы</button>
               <ActionButton small kind="primary" disabledReason={reason} onClick={async () => {
                 try {

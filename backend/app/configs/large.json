@@ -4,6 +4,7 @@
     "id": "ALM",
     "name": "Алматы (демо)",
     "timezone": "Asia/Almaty",
+    "geo": {"lat": 43.272, "lon": 76.938, "axis_deg": 8, "source": "demo"},
     "note": "Схема, ограничения и показатели станции демонстрационные и не соответствуют реальной станции Алматы."
   },
   "layout": {"x_west": 170, "x_east": 1430, "dx": 32, "lane_gap": 34, "x_west_end": 880, "x_east_start": 960, "x_entry_west": 20, "x_entry_east": 1580},

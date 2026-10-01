@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import Response
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
@@ -113,7 +113,19 @@ def topology(db: Session = Depends(get_db), _: User = Depends(require("state.vie
     return {"station": {"id": st.id, "name": st.name, "timezone": st.timezone, "is_demo": st.is_demo,
                         "note": st.config["station"].get("note"), "config_id": st.config.get("config_id")},
             "nodes": nodes, "tracks": tracks, "connections": conns, "zones": zones, "parks": parks, "devices": devices,
+            "geometry": (st.config or {}).get("derived") or {"schema_scale_u_per_m": 0.8},
+            "layout": {k: st.config["layout"].get(k) for k in ("lane_gap", "x_entry_west", "x_entry_east")},
             "bounds": {"min_x": min(xs) - 40, "max_x": max(xs) + 40, "min_y": min(ys) - 50, "max_y": max(ys) + 50}}
+
+
+@router.get("/network", tags=["Состояние"], summary="Железнодорожная сеть: станции, перегоны, пути перегонов (метры ENU)")
+def network(db: Session = Depends(get_db), _: User = Depends(require("state.view"))):
+    from app.domain.network import network_for_station_cfg
+    st = db.execute(select(Station).where(Station.kind == "main")).scalar_one()
+    try:
+        return network_for_station_cfg(st.config or {})
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
 
 
 @router.get("/stations", tags=["Состояние"], summary="Основная и соседние станции (упрощённое состояние)")

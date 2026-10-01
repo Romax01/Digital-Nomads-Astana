@@ -2,7 +2,7 @@
 // используется и для живого режима, и для воспроизведения истории.
 import type { ViewState } from "./types";
 
-export const SINGLETONS = ["meta", "index", "plan", "kpi", "maintenance"] as const;
+export const SINGLETONS = ["meta", "index", "plan", "kpi", "maintenance", "network"] as const;
 export const COLLECTIONS = ["tracks", "trains", "operations", "resources", "incidents", "conflicts", "recommendations",
   "requests", "alerts", "switches"] as const;
 

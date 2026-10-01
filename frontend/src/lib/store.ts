@@ -1,8 +1,12 @@
 import { create } from "zustand";
-import type { Selection, Topology, ViewState } from "./types";
+import type { NetworkStatic, Selection, Topology, ViewState } from "./types";
 
 export type ConnState = "connecting" | "online" | "reconnecting" | "offline";
 export type Mode = "live" | "history" | "forecast";
+
+export type Level = "network" | "station";
+/** Режимы камеры. «Следовать за поездом» включается явно и выключается той же кнопкой. */
+export type CamMode = "network" | "station" | "selected" | "follow" | "free";
 
 export interface Toast { id: number; kind: "ok" | "error" | "info" | "warn"; text: string; hint?: string }
 
@@ -18,13 +22,19 @@ interface Store {
   replay: { frames: ReplayFrame[]; index: number; playing: boolean; speed: number; loading: boolean; error?: string };
   setReplay: (p: Partial<Store["replay"]>) => void;
   selection: Selection; select: (s: Selection) => void;
-  view: "2d" | "3d"; setView: (v: "2d" | "3d") => void;
+  network: NetworkStatic | null; networkError: string | null; setNetwork: (n: NetworkStatic | null, err?: string | null) => void;
+  /** 3D-двойник: уровень, режим камеры, подсветка рекомендации, панели. Выбор — только просмотр. */
+  level: Level; setLevel: (l: Level) => void;
+  cam: CamMode; camSeq: number; setCam: (c: CamMode) => void;
+  highlight: { ids: string[]; source: string } | null; setHighlight: (h: Store["highlight"]) => void;
+  panels: { right: boolean; bottom: boolean; ganttFull: boolean; fullscreen: boolean };
+  setPanels: (p: Partial<Store["panels"]>) => void;
   toasts: Toast[]; toast: (kind: Toast["kind"], text: string, hint?: string) => void; dismiss: (id: number) => void;
   theme: "dark" | "light"; setTheme: (t: "dark" | "light") => void;
 }
 
 const savedTheme = (() => { try { return (localStorage.getItem("ds_theme") as any) || "dark"; } catch { return "dark"; } })();
-const savedView = (() => { try { return (localStorage.getItem("ds_view") as any) || "2d"; } catch { return "2d"; } })();
+const savedPanels = (() => { try { return JSON.parse(localStorage.getItem("ds_panels") || "null"); } catch { return null; } })();
 let toastId = 1;
 
 export const useStore = create<Store>((set) => ({
@@ -37,7 +47,16 @@ export const useStore = create<Store>((set) => ({
   replay: { frames: [], index: 0, playing: false, speed: 1, loading: false },
   setReplay: (p) => set((s) => ({ replay: { ...s.replay, ...p } })),
   selection: null, select: (s) => set({ selection: s }),
-  view: savedView, setView: (v) => { try { localStorage.setItem("ds_view", v); } catch { /* */ } set({ view: v }); },
+  network: null, networkError: null, setNetwork: (n, err = null) => set({ network: n, networkError: err }),
+  level: "station", setLevel: (l) => set({ level: l }),
+  cam: "station", camSeq: 0, setCam: (c) => set((s) => ({ cam: c, camSeq: s.camSeq + 1 })),
+  highlight: null, setHighlight: (h) => set({ highlight: h }),
+  panels: { right: true, bottom: true, ganttFull: false, ...(savedPanels || {}), fullscreen: false },
+  setPanels: (p) => set((s) => {
+    const panels = { ...s.panels, ...p };
+    try { localStorage.setItem("ds_panels", JSON.stringify({ right: panels.right, bottom: panels.bottom, ganttFull: panels.ganttFull })); } catch { /* */ }
+    return { panels };
+  }),
   toasts: [],
   toast: (kind, text, hint) => {
     const id = toastId++;

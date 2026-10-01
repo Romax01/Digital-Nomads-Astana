@@ -1,0 +1,49 @@
+{
+  "type": "FeatureCollection",
+  "name": "Демонстрационная сеть «Цифровая станция»",
+  "properties": {
+    "source": "demo",
+    "note": "Демонстрационная сеть: координаты и состав перегонов условные и не являются данными реальной инфраструктуры. Реальные названия станций не делают модель точной."
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": null},
+      "properties": {"kind": "station", "id": "@main", "detail": "detailed",
+                     "comment": "Основная станция: координаты и ось берутся из конфигурации станции (geo)"}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [75.215, 43.535]},
+      "properties": {"kind": "station", "id": "OTR", "detail": "simplified", "axis_deg": -12, "half_length_m": 900}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [77.13, 43.695]},
+      "properties": {"kind": "station", "id": "ZHT", "detail": "simplified", "axis_deg": 35, "half_length_m": 900}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "LineString", "coordinates": [[75.62, 43.47], [76.10, 43.385], [76.55, 43.31]]},
+      "properties": {"kind": "section", "id": "SEC-OTR-MAIN", "name": "Отар — основная станция",
+                     "from": "OTR", "from_throat": "east", "to": "@main", "to_throat": "west",
+                     "tracks": 2, "length_m": null, "max_speed_kmh": 100,
+                     "comment": "Двухпутный перегон: путь 1 — к основной станции, путь 2 — от неё"}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "LineString", "coordinates": [[77.03, 43.40], [77.09, 43.57]]},
+      "properties": {"kind": "section", "id": "SEC-MAIN-ZHT", "name": "Основная станция — Жетыген",
+                     "from": "@main", "from_throat": "east", "to": "ZHT", "to_throat": "west",
+                     "tracks": 1, "length_m": null, "max_speed_kmh": 80}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "LineString", "coordinates": [[75.75, 43.74], [76.45, 43.83]]},
+      "properties": {"kind": "section", "id": "SEC-OTR-ZHT", "name": "Обходная ветвь Отар — Жетыген (демо)",
+                     "from": "OTR", "from_throat": "east", "to": "ZHT", "to_throat": "west",
+                     "tracks": 1, "length_m": null, "max_speed_kmh": 70,
+                     "comment": "Используется альтернативой «другая станция» в проверке заявки"}
+    }
+  ]
+}

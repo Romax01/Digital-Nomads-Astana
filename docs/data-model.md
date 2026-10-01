@@ -96,3 +96,16 @@ WHERE (status = 'confirmed');
 | `index_snapshots` | значение, категория, составляющие, качество — для динамики и отчёта |
 | `state_snapshots` | полное представление состояния раз в 30 с |
 | `state_deltas` | дельта каждого изменения состояния (версия, реальное и модельное время) |
+
+## Сеть и геометрия (1.3.0)
+
+Новых таблиц нет: сеть описывается файлом GeoJSON (см. [network-import.md](network-import.md)), а вычисленная геометрия кэшируется в памяти процесса.
+
+| Где | Что хранится |
+|---|---|
+| `stations.config.station.geo` | широта, долгота и ось основной станции, источник (`demo`) |
+| `stations.config.derived` | вычисленный при заполнении масштаб схемы `schema_scale_u_per_m` (u/м), радиус и угол стрелочного перевода |
+| `topology_nodes`, `tracks.points`, `track_connections.points` | плавная геометрия: стрелки — дуги радиуса R, касательные к узлам; `track_connections.length_m` — физическая длина ребра, м |
+| `configs/network_demo.geojson` | станции (`detail`: detailed / simplified), перегоны (`tracks`, `length_m` или геодезическая длина, горловины, скорость) |
+
+Модель сети (`GET /api/v1/network`) содержит станции, горловины, перегоны, отдельные пути перегона и проекцию. Она строится функцией `app/domain/network.py::build_network`.

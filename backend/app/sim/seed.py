@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
 from app.core.timeutil import UTC, utcnow
-from app.domain.topology import build_topology, load_config
+from app.domain.topology import build_topology, load_config, point_at, poly_len
 from app.models import (
     CapacityRule, Device, IndexConfig, MaintenanceWindow, Operation, Park, Plan, Resource, ResourceShift, SimState,
     Station, TopologyNode, Track, TrackConnection, Train, TransferRequest, User, Wagon, Zone,
@@ -94,6 +94,7 @@ def wipe(db: Session):
 def seed_static(db: Session, cfg: dict, rnd: random.Random, t0: datetime):
     topo = build_topology(cfg)
     sid = cfg["station"]["id"]
+    cfg = {**cfg, "derived": topo["geometry"]}  # масштаб схемы — общий для путей и составов
     db.add(Station(id=sid, name=cfg["station"]["name"], kind="main", is_demo=True,
                    timezone=cfg["station"].get("timezone", "Asia/Almaty"), config=cfg))
     day = local_day(cfg)
@@ -158,8 +159,7 @@ def seed_static(db: Session, cfg: dict, rnd: random.Random, t0: datetime):
 def seed_devices(db: Session, cfg: dict, topo: dict):
     sid = cfg["station"]["id"]
     for t in topo["tracks"]:
-        x = sum(p[0] for p in t["points"]) / 2
-        y = t["points"][0][1]
+        x, y, _ = point_at(t["points"], poly_len(t["points"]) / 2)  # середина пути по геометрии
         db.add(Device(id=f"{sid}-TC-{t['number']}", name=f"Рельсовая цепь, {t['name'].lower()}", kind="track_circuit",
                       station_id=sid, object_id=t["id"], allowed_event_types=["occupancy", "heartbeat"],
                       period_s=2, stale_after_s=8, x=x, y=y))

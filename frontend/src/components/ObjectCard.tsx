@@ -4,6 +4,7 @@ import { ago, fmtFull, fmtHM, fmtMin, ms } from "../lib/format";
 import { DATA_STATE, SEVERITY, TRACK_STATUS } from "../lib/labels";
 import { can, useStore } from "../lib/store";
 import type { ViewState } from "../lib/types";
+import { DeviceCard, SectionCard, StationCard, ZoneCard } from "../twin/Cards";
 import { IncidentDialog, OverrideDialog, RescheduleOpDialog } from "./Dialogs";
 import { useNow } from "./Header";
 import { ActionButton, Badge, Empty, useFetch } from "./ui";
@@ -175,10 +176,23 @@ export default function ObjectCard({ st }: { st: ViewState }) {
       </div>
     );
   }
-  if (sel.type === "zone") {
-    return <div className="col"><h2>Зона {sel.id}</h2><p className="muted">Связанные пути выделены на схеме.</p></div>;
-  }
+  if (sel.type === "zone") return <ZoneCard st={st} id={sel.id} />;
+  if (sel.type === "station") return <StationCard st={st} id={sel.id} />;
+  if (sel.type === "section") return <SectionCard st={st} id={sel.id} />;
+  if (sel.type === "device") return <DeviceCard id={sel.id} />;
   return <Empty text="Нет карточки для объекта" />;
+}
+
+const WAGON_RU: Record<string, string> = { gondola: "полувагон", covered: "крытый", tank: "цистерна", flat: "платформа", hopper: "хоппер", passenger: "пассажирский" };
+
+/** Сводка состава по типам: «полувагон 14 (гружёных 10) · цистерна 9». */
+function consistSummary(c: NonNullable<ViewState["trains"][string]["consist"]>) {
+  const by: Record<string, { n: number; loaded: number; faulty: number }> = {};
+  for (const g of c.groups) {
+    const x = (by[g.kind] ||= { n: 0, loaded: 0, faulty: 0 });
+    x.n += g.count; if (g.loaded) x.loaded += g.count; if (g.faulty) x.faulty += g.count;
+  }
+  return Object.entries(by).map(([k, x]) => `${WAGON_RU[k] ?? k} ${x.n}${x.loaded && k !== "passenger" ? ` (гружёных ${x.loaded})` : ""}${x.faulty ? ` ⚠ ${x.faulty}` : ""}`).join(" · ");
 }
 
 function TrainCard({ st, id, incReason }: { st: ViewState; id: string; incReason: string | null }) {
@@ -187,12 +201,15 @@ function TrainCard({ st, id, incReason }: { st: ViewState; id: string; incReason
   const { data } = useFetch(() => api.get(`/api/v1/trains/${id}`), [id, t?.status]);
   if (!t) return <Empty text="Поезд вне окна отображения" hint="Он уже отправлен или прибудет позже." />;
   const wagon = data?.wagons?.find((w: any) => w.condition === "ok");
+  const net = st.network?.trains[id];
   return (
     <div className="col">
       <div className="row between"><h2 style={{ margin: 0 }}>Поезд № {t.number}</h2><Badge cls={t.delay_min >= 5 ? "warn" : "ok"}>{t.status_label}</Badge></div>
       <dl className="kv">
         <dt>Вид / приоритет</dt><dd>{{ freight: "грузовой", transfer: "передаточный (заявка)", passenger: "пассажирский" }[t.kind] ?? t.kind} · {t.priority} из 5</dd>
         <dt>Состав</dt><dd>{t.wagons} ваг., {t.length_m ? `${t.length_m.toFixed(0)} м` : "длина неизвестна"}</dd>
+        {t.consist && t.consist.groups.length > 0 && <><dt>Вагоны</dt><dd>{consistSummary(t.consist)}{t.consist.source !== "wagons" ? <span className="faint"> — тип по роду поезда</span> : null}</dd></>}
+        {net && <><dt>Местоположение</dt><dd>{net.phase_label}{net.section_id ? ` · путь № ${net.track_no} перегона` : ""}{net.phase === "on_section" ? ` · пройдено ${Math.round((net.frac ?? 0) * 100)} %` : ""}</dd></>}
         <dt>Путь</dt><dd>{st.tracks[t.track_id ?? ""]?.label ?? "—"}</dd>
         <dt>Прибытие</dt><dd>{fmtHM(t.scheduled_arrival)} (прогноз {fmtHM(t.expected_arrival)})</dd>
         <dt>Отправление</dt><dd>{t.scheduled_departure ? `${fmtHM(t.scheduled_departure)} (прогноз ${fmtHM(t.expected_departure)})` : "переработка на станции"}</dd>

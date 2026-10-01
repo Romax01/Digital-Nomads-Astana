@@ -4,6 +4,7 @@
     "id": "SHM",
     "name": "Шамалган (демо)",
     "timezone": "Asia/Almaty",
+    "geo": {"lat": 43.372, "lon": 76.622, "axis_deg": 5, "source": "demo"},
     "note": "Небольшая демонстрационная станция без депо и сортировочного парка. Данные синтетические."
   },
   "layout": {"x_west": 220, "x_east": 1380, "dx": 34, "lane_gap": 40, "x_west_end": 880, "x_east_start": 900, "x_entry_west": 20, "x_entry_east": 1580},

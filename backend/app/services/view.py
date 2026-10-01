@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import aware, iso, utcnow
+from app.domain.network import network_for_station_cfg, section_between, track_for
 from app.domain.statuses import LABELS
 from app.iot.quality import STATE_LABELS, device_statuses
 from app.models import (
@@ -142,7 +143,7 @@ def build_view(db: Session, model: StationModel, engine_waiting: dict, index: di
             "current_op": {"id": cur.id, "kind": cur.kind, "label": KIND_LABEL.get(cur.kind)} if cur else None,
             "next_op": {"id": nxt.id, "kind": nxt.kind, "label": KIND_LABEL.get(nxt.kind), "start": iso(fc.get(nxt.id, (nxt.planned_start,))[0])} if nxt else None,
             "faulty_wagons": [w.number for w in wl if w.condition == "faulty"],
-            "wagon_kinds": _kinds(wl), "pos": train_position(model, t, ops),
+            "wagon_kinds": _kinds(wl), "pos": train_position(model, t, ops), "consist": _consist(t, wl),
             "transfer_request_id": t.transfer_request_id, "conflict_ids": conflict_objs.get(tid, []),
         }
     operations = {}
@@ -254,6 +255,7 @@ def build_view(db: Session, model: StationModel, engine_waiting: dict, index: di
            "free_rd_tracks": sum(1 for t in tracks.values() if t["kind"] == "receiving_departure" and t["status"] == "free"),
            "rd_tracks": sum(1 for t in tracks.values() if t["kind"] == "receiving_departure")}
     sim = model.sim
+    network = network_view(model, trains, kpi, incidents)
     return {
         "meta": {"model_time": iso(now), "real_time": iso(utcnow()), "speed": sim.speed, "running": sim.running,
                  "scenario": sim.scenario, "scenario_title": SCENARIOS.get(sim.scenario, {}).get("title", sim.scenario),
@@ -263,10 +265,122 @@ def build_view(db: Session, model: StationModel, engine_waiting: dict, index: di
         "tracks": tracks, "trains": trains, "operations": operations, "resources": resources,
         "incidents": incidents, "conflicts": {c["id"]: c for c in conflicts}, "recommendations": recs,
         "requests": requests, "alerts": alerts, "switches": switches,
-        "index": index, "plan": plan, "kpi": kpi,
+        "index": index, "plan": plan, "kpi": kpi, "network": network,
         "maintenance": [{"id": m.id, "object_type": m.object_type, "object_id": m.object_id, "start": iso(m.start_at),
                          "end": iso(m.end_at), "reason": m.reason} for m in model.maintenance],
     }
+
+
+NET_PHASE_LABEL = {"at_origin": "На станции отправления", "on_section": "На перегоне",
+                   "waiting_entry": "Ожидает приёма у входного сигнала", "at_station": "На основной станции",
+                   "arrived": "Прибыл на станцию назначения"}
+
+
+def network_view(model: StationModel, trains: dict, kpi: dict, incidents: dict) -> dict | None:
+    """Уровень «Сеть»: где находится каждый поезд — на станции или на перегоне (доля пути 0…1).
+
+    Поезд всегда ровно в одном месте: до прибытия — на перегоне (или на станции отправления),
+    на основной станции — только в состоянии станции (pos), после отправления — на перегоне,
+    затем на станции назначения. Положение — доля по геометрии того пути перегона, по которой
+    рисуются рельсы; frac_rate — скорость в долях за модельную секунду (клиент интерполирует,
+    но не дальше frac_max — границы операции)."""
+    try:
+        net = network_for_station_cfg(model.cfg)
+    except Exception:  # noqa: BLE001 — нет данных сети: уровень «Сеть» недоступен, станция работает
+        return None
+    main = model.sid
+    now = model.now
+    out: dict = {}
+
+    def travel(nid: str) -> float:
+        n = model.neighbors.get(nid)
+        return float(((n.config or {}).get("travel_min") if n else None) or 60)
+
+    def on_sec(tid, a, b, frac, rate, phase):
+        sec = section_between(net, a, b)
+        if not sec:
+            return None
+        tr = track_for(sec, a)
+        return {"phase": phase, "phase_label": NET_PHASE_LABEL[phase], "section_id": sec["id"], "track_id": tr["id"],
+                "track_no": tr["no"], "reverse": sec["from"] != a, "from": a, "to": b,
+                "frac": round(min(1.0, max(0.0, frac)), 5), "frac_rate": round(rate, 7), "frac_max": 1.0}
+
+    for tid, t in trains.items():
+        tr_model = model.trains[tid]
+        st = t["status"]
+        ph = None
+        pos = t["pos"]
+        if pos is not None and not pos.get("waiting"):
+            # движение или стоянка на основной станции: поезд только на станции, не на перегоне
+            ph = {"phase": "at_station", "phase_label": NET_PHASE_LABEL["at_station"], "station_id": main}
+        elif st in ("scheduled", "approaching"):
+            org = t["origin"]
+            eta = aware(tr_model.expected_arrival or tr_model.scheduled_arrival) if (tr_model.expected_arrival or tr_model.scheduled_arrival) else None
+            if org and org != main and eta and t["pos"] is None:
+                tm = travel(org) * 60
+                left = (eta - now).total_seconds()
+                if left > tm:
+                    ph = {"phase": "at_origin", "phase_label": NET_PHASE_LABEL["at_origin"], "station_id": org,
+                          "eta": iso(eta)}
+                elif left > 0:
+                    ph = on_sec(tid, org, main, 1 - left / tm, 1 / tm, "on_section")
+                else:
+                    ph = on_sec(tid, org, main, 1.0, 0, "waiting_entry")
+            elif t["pos"] is not None:
+                ph = {"phase": "at_station", "phase_label": NET_PHASE_LABEL["at_station"], "station_id": main}
+        elif st == "waiting":
+            org = t["origin"]
+            ph = (on_sec(tid, org, main, 1.0, 0, "waiting_entry") if org and org != main else None) or                 {"phase": "at_station", "phase_label": NET_PHASE_LABEL["at_station"], "station_id": main}
+        elif st == "on_station":
+            ph = {"phase": "at_station", "phase_label": NET_PHASE_LABEL["at_station"], "station_id": main}
+        elif st == "departed":
+            dst = t["destination"]
+            ops = model.ops_by_train.get(tid, [])
+            end = max((aware(o.actual_end) for o in ops if o.kind == "departure" and o.actual_end), default=None)
+            if dst and dst != main and end:
+                tm = travel(dst) * 60
+                frac = (now - end).total_seconds() / tm
+                ph = on_sec(tid, main, dst, frac, 1 / tm, "on_section") if frac < 1 else                     {"phase": "arrived", "phase_label": NET_PHASE_LABEL["arrived"], "station_id": dst}
+        if ph:
+            ph.update({"train_id": tid, "number": t["number"], "kind": t["kind"], "wagons": t["wagons"],
+                       "length_m": t["length_m"], "delay_min": t["delay_min"]})
+            out[tid] = ph
+    restricted = {i["object_id"]: i for i in incidents.values()
+                  if i.get("kind") == "neighbor_restriction" and i.get("status") == "active"}
+    stations = {}
+    for s in net["stations"]:
+        sid = s["id"]
+        inbound = sum(1 for p in out.values() if p.get("to") == sid and p["phase"] in ("on_section", "waiting_entry"))
+        here = sum(1 for p in out.values() if p.get("station_id") == sid)
+        if sid == main:
+            stations[sid] = {"id": sid, "trains_here": kpi["trains_on_station"], "inbound": inbound,
+                             "conflicts": kpi["conflicts"], "critical": kpi["critical"],
+                             "free_rd_tracks": kpi["free_rd_tracks"], "rd_tracks": kpi["rd_tracks"]}
+        else:
+            r = restricted.get(sid)
+            stations[sid] = {"id": sid, "trains_here": here, "inbound": inbound,
+                             "restriction": {"title": r["title"], "until": r.get("end")} if r else None}
+    return {"source": net["source"], "trains": out, "stations": stations}
+
+
+def _consist(t, wl) -> dict:
+    """Состав в порядке от локомотива: группы подряд идущих однотипных вагонов (RLE).
+    Число и длины вагонов — из данных; 3D не меняет ни количество, ни длину."""
+    groups: list[list] = []
+    src = "wagons"
+    if wl:
+        for w in sorted(wl, key=lambda w: w.position):
+            ln = round(w.length_m or 0, 2) or None
+            key = [w.kind, ln, bool(w.loaded), w.condition == "faulty"]
+            if groups and groups[-1][:2] == key[:2] and groups[-1][3:5] == key[2:]:
+                groups[-1][2] += 1
+            else:
+                groups.append([w.kind, ln, 1, key[2], key[3]])
+    elif t.wagons_count:
+        src = "train_kind"  # вагоны поштучно неизвестны — тип по роду поезда
+        groups.append(["passenger" if t.kind == "passenger" else "covered", None, t.wagons_count, False, False])
+    return {"loco_length_m": t.loco_length_m or 34.0, "source": src,
+            "groups": [{"kind": g[0], "length_m": g[1], "count": g[2], "loaded": g[3], "faulty": g[4]} for g in groups]}
 
 
 def _kinds(wl):
@@ -290,7 +404,7 @@ def loco_position(model, r: Resource, cur, trains, zones):
     return None
 
 
-SINGLETONS = ("meta", "index", "plan", "kpi", "maintenance")
+SINGLETONS = ("meta", "index", "plan", "kpi", "maintenance", "network")
 COLLECTIONS = ("tracks", "trains", "operations", "resources", "incidents", "conflicts", "recommendations",
                "requests", "alerts", "switches")
 

@@ -42,7 +42,7 @@ flowchart LR
   BUS --> RP[Перепланирование\ndebounce 1 с]
   RP -- CP-SAT 3,5 с + валидатор --> DB
   HUB -- snapshot / delta по версии --> WS[WebSocket]
-  WS --> UI[Браузер: 2D, 3D, Гант, панели]
+  WS --> UI[Браузер: 3D-двойник (сеть и станция), Гант, панели]
   HUB -- дельты и снимки --> DB
   SIM -. эталонный мир /sim/world .-> ENG
 ```

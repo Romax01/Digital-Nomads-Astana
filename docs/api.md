@@ -37,7 +37,8 @@
 | GET `/health` | — | состояние сервиса, MQTT, число клиентов WebSocket |
 | GET `/auth/me`, `/auth/demo-users`, `/permissions` | — | пользователь и права, матрица прав |
 | GET `/state` | state.view | полное состояние (то же, что первый снимок WebSocket) |
-| GET `/topology` | state.view | узлы, пути, соединения, зоны, устройства, границы схемы |
+| GET `/topology` | state.view | узлы, пути, соединения, зоны, устройства, границы схемы; `geometry.schema_scale_u_per_m` — единый масштаб станции (u/м) |
+| GET `/network` | state.view | сеть: станции (уровень детализации, горловины, упрощённые параметры), перегоны (длина и её источник, пути перегона с геометрией в метрах ENU), проекция; 422 — ошибки формата данных сети |
 | GET `/stations`, `/schedule`, `/trains/{id}`, `/tracks/{id}`, `/capacity` | state.view | справочники, расписание с прогнозом, карточки, ограничения и загрузка |
 | GET/POST `/requests` | state.view / request.create | список и создание заявок |
 | POST `/requests/{id}/check` | request.check | проверка приёма |

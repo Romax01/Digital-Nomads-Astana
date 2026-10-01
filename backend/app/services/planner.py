@@ -744,7 +744,8 @@ def diff_schedule(model: StationModel, schedule: dict) -> list[dict]:
         if moved == 0 and not track_changed and not res_changed and o.reserved:
             continue
         t = model.trains.get(o.train_id) if o.train_id else None
-        out.append({"operation_id": oid, "train": t.number if t else None, "kind": o.kind,
+        out.append({"operation_id": oid, "train": t.number if t else None, "train_id": o.train_id, "kind": o.kind,
+                    "track_ids": sorted({x for x in (o.track_id, e["track_id"], o.from_track_id, e.get("from_track_id")) if x}),
                     "kind_label": KIND_LABEL.get(o.kind, o.kind), "status": o.status,
                     "from": {"track": model.track_label(o.track_id), "start": iso(o.planned_start),
                              "resources": [model.resources[r].name for r in (o.resource_ids or []) if r in model.resources]},
