@@ -178,7 +178,7 @@ def _what_if(db, model, q, ctx):
     plan_info = None
     if new:
         from app.services.planner import run_planner
-        db.expire_all()
+        db.commit()  # не держать транзакцию на время расчёта (объекты модели остаются доступны)
         res = run_planner(model, time_limit=2.0, trigger="what_if")
         sa, sb = res["summary"]["after"], res["summary"]["before"]
         plan_info = {"status": res["status_label"], "changes": len(res["changes"]), "delay_after": sa["total_delay_min"],
@@ -227,6 +227,7 @@ def _overload(db, model, q, ctx):
 
 def _reduce(db, model, q, ctx):
     from app.services.planner import run_planner
+    db.commit()  # не держать транзакцию на время расчёта
     res = run_planner(model, trigger="assistant")
     sb, sa = res["summary"]["before"], res["summary"]["after"]
     if not res["changes"]:

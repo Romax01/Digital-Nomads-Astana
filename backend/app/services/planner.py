@@ -214,7 +214,8 @@ class PlanBuilder:
                 st_s = mdl.NewConstant(0)  # поезд уже стоит на пути: путь занят с текущего момента
             size = mdl.NewIntVar(0, 2 * H_MAX, f"sz_{st['idx']}")
             end_b = mdl.NewIntVar(-H_MAX, 3 * H_MAX, f"eb_{st['idx']}")
-            mdl.Add(end_b == st_e + self.buf)
+            # выезд уже идёт — запас не добавляется: два начатых занятия не могут «конфликтовать»
+            mdl.Add(end_b == st_e + (0 if last.fixed else self.buf))
             mdl.Add(size == end_b - st_s)
             lits = []
             for t in st["cands"]:
@@ -609,6 +610,8 @@ def verify(model: StationModel, schedule: dict, unresolved_tracks: set | None = 
             fixed = sp["operation_id"] in fixed_ops
             hits = book.conflicts(sp["key"], sp["start"], sp["end"])
             for h in hits:
+                if fixed and h.meta.get("fixed"):
+                    continue
                 if h.meta.get("type") == "reservation" or not fixed:
                     if h.meta.get("type") == "data" and (fixed or sp["key"][6:] in unresolved_tracks):
                         continue
@@ -617,7 +620,8 @@ def verify(model: StationModel, schedule: dict, unresolved_tracks: set | None = 
                     errors.append(f"{sp['key']}: {sp['purpose']} {local_hm(sp['start'])}–{local_hm(sp['end'])} "
                                   f"пересекается с «{h.meta.get('label', h.meta.get('type'))}»")
                     break
-            book.add(sp["key"], sp["start"], sp["end"], type="reservation", label=sp["purpose"], train_id=sp["train_id"])
+            book.add(sp["key"], sp["start"], sp["end"], type="reservation", label=sp["purpose"], train_id=sp["train_id"],
+                     fixed=fixed)
     return errors
 
 

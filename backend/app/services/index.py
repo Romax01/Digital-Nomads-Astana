@@ -209,6 +209,7 @@ def compute_plan_index(model, schedule: dict | None, kpis: dict) -> dict:
     from app.db import SessionLocal
     with SessionLocal() as db:
         ic = active_config(db)
+        db.commit()
     cfg = ic.config
     p = cfg["params"]
     now = model.now

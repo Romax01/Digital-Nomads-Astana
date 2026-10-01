@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Цифровая станция — презентация</title>
+<style>
+  :root { --bg:#0d141c; --panel:#141e29; --text:#e7edf3; --muted:#9eadbd; --accent:#5aa9ff; --ok:#3ccf91; --warn:#ffb547; --bad:#ff6464; --unk:#b892ff; --line:#2a3a4c; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font:18px/1.45 "Segoe UI", Inter, system-ui, sans-serif; }
+  .slide { display:none; position:absolute; inset:0; padding:48px 64px; flex-direction:column; gap:18px; overflow:hidden; }
+  .slide.on { display:flex; }
+  h1 { font-size:46px; margin:0; } h2 { font-size:32px; margin:0 0 6px; } h3 { margin:0 0 6px; font-size:20px; color:var(--accent); }
+  .sub { color:var(--muted); font-size:22px; }
+  .demo { display:inline-block; background:var(--warn); color:#1b1300; font-weight:700; padding:2px 10px; border-radius:6px; font-size:15px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  ul { margin:6px 0 0; padding-left:22px; } li { margin:4px 0; }
+  table { border-collapse:collapse; width:100%; font-size:16px; } td, th { border-bottom:1px solid var(--line); padding:6px 8px; text-align:left; } th { color:var(--muted); }
+  .formula { font:600 34px/1.3 Consolas, monospace; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 24px; display:inline-block; }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); } .unk { color:var(--unk); } .muted { color:var(--muted); }
+  .foot { position:absolute; bottom:14px; left:64px; right:64px; display:flex; justify-content:space-between; color:var(--muted); font-size:14px; }
+  .msg { background:var(--panel); border-left:4px solid var(--bad); padding:10px 14px; border-radius:6px; font-size:17px; }
+  .msg.ok { border-left-color:var(--ok); } .msg.warn { border-left-color:var(--warn); } .msg.unk { border-left-color:var(--unk); }
+  svg text { fill:var(--text); font-family:"Segoe UI",sans-serif; }
+  @media print { .slide { display:flex !important; position:relative; page-break-after:always; height:100vh; } .foot { position:absolute; } }
+</style>
+</head>
+<body>
+
+<section class="slide on">
+  <span class="demo">ДЕМО-MVP · синтетические данные</span>
+  <h1>Цифровая станция</h1>
+  <div class="sub">Цифровой двойник железнодорожной станции: состояние, ограничения, перепланирование и IoT в одной системе поддержки решений диспетчера</div>
+  <div class="grid" style="margin-top:24px">
+    <div class="card"><h3>Что внутри</h3><ul><li>Backend FastAPI + PostgreSQL + OR-Tools CP-SAT</li><li>Frontend React + Three.js (R3F): 2D, 3D, Гант</li><li>IoT: симулятор → Mosquitto → приём с проверками</li></ul></div>
+    <div class="card"><h3>Честные границы</h3><ul><li>Станция «Алматы (демо)» — условная схема</li><li>Не управляет стрелками, сигналами, поездами</li><li>Не сертифицированная система безопасности</li></ul></div>
+  </div>
+</section>
+
+<section class="slide">
+  <h2>Проблема и цель</h2>
+  <div class="grid">
+    <div class="card"><h3>Сейчас</h3><ul><li>Прибытия, отправления, пути, бригады, грузовые фронты, ремонт и ограничения соседей — в разных источниках</li><li>Конфликт виден, когда он уже случился</li><li>«Можно ли принять 40 вагонов в 14:30?» — ответ вручную, без объяснения</li></ul></div>
+    <div class="card"><h3>Цифровой двойник даёт</h3><ul><li>Текущее и прогнозное состояние станции</li><li>Проверку заявки до подтверждения — с причиной отказа</li><li>Ближайшее допустимое окно и проверенные альтернативы</li><li>Перепланирование после сбоя за секунды</li><li>Наблюдение за датчиками и качеством данных</li></ul></div>
+  </div>
+</section>
+
+<section class="slide">
+  <h2>Архитектура</h2>
+  <svg viewBox="0 0 1200 430" width="100%" style="max-height:62vh">
+    <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5aa9ff"/></marker></defs>
+    <g font-size="16">
+      <rect x="20" y="40" width="200" height="80" rx="10" fill="#1a2633" stroke="#2a3a4c"/><text x="120" y="75" text-anchor="middle" font-weight="700">Симулятор IoT</text><text x="120" y="100" text-anchor="middle" fill="#9eadbd">43 устройства</text>
+      <rect x="280" y="40" width="190" height="80" rx="10" fill="#1a2633" stroke="#2a3a4c"/><text x="375" y="75" text-anchor="middle" font-weight="700">Mosquitto</text><text x="375" y="100" text-anchor="middle" fill="#9eadbd">MQTT, ACL, QoS 1</text>
+      <rect x="530" y="20" width="430" height="300" rx="12" fill="#141e29" stroke="#5aa9ff"/><text x="745" y="48" text-anchor="middle" font-weight="700" fill="#5aa9ff">Backend (FastAPI, модульный монолит)</text>
+      <rect x="550" y="65" width="190" height="52" rx="8" fill="#1a2633"/><text x="645" y="96" text-anchor="middle">Приём телеметрии</text>
+      <rect x="750" y="65" width="190" height="52" rx="8" fill="#1a2633"/><text x="845" y="96" text-anchor="middle">Качество данных</text>
+      <rect x="550" y="127" width="390" height="40" rx="8" fill="#223142"/><text x="745" y="153" text-anchor="middle">Внутренняя шина доменных событий</text>
+      <rect x="550" y="177" width="125" height="52" rx="8" fill="#1a2633"/><text x="612" y="208" text-anchor="middle">Движок</text>
+      <rect x="682" y="177" width="125" height="52" rx="8" fill="#1a2633"/><text x="744" y="200" text-anchor="middle">Проверки</text><text x="744" y="220" text-anchor="middle">конфликты</text>
+      <rect x="815" y="177" width="125" height="52" rx="8" fill="#1a2633"/><text x="877" y="208" text-anchor="middle">CP-SAT</text>
+      <rect x="550" y="239" width="390" height="40" rx="8" fill="#223142"/><text x="745" y="265" text-anchor="middle">Единое состояние · снимки и дельты · аудит</text>
+      <rect x="1010" y="40" width="170" height="80" rx="10" fill="#1a2633" stroke="#2a3a4c"/><text x="1095" y="75" text-anchor="middle" font-weight="700">Браузер</text><text x="1095" y="100" text-anchor="middle" fill="#9eadbd">2D · 3D · Гант</text>
+      <rect x="640" y="355" width="210" height="60" rx="10" fill="#1a2633" stroke="#2a3a4c"/><text x="745" y="390" text-anchor="middle" font-weight="700">PostgreSQL 16</text>
+      <line x1="220" y1="80" x2="278" y2="80" stroke="#5aa9ff" stroke-width="2" marker-end="url(#a)"/>
+      <line x1="470" y1="80" x2="548" y2="90" stroke="#5aa9ff" stroke-width="2" marker-end="url(#a)"/>
+      <line x1="960" y1="80" x2="1008" y2="80" stroke="#5aa9ff" stroke-width="2" marker-end="url(#a)"/><text x="985" y="140" text-anchor="middle" fill="#9eadbd" font-size="13">WebSocket</text>
+      <line x1="745" y1="320" x2="745" y2="353" stroke="#5aa9ff" stroke-width="2" marker-end="url(#a)"/>
+    </g>
+  </svg>
+  <div class="muted">MQTT — приём телеметрии от устройств; WebSocket — доставка состояния браузеру. Kafka/RabbitMQ не нужны для MVP: внутренняя шина + БД как источник истины (ADR-0001, ADR-0002).</div>
+</section>
+
+<section class="slide">
+  <h2>IoT-контур и качество данных</h2>
+  <div class="grid">
+    <div class="card"><h3>Конвейер</h3><ul><li>Контракт 1.0: event_id, device_id, sequence_number, boot_id, observed_at / received_at, quality, source_mode</li><li>Проверки: структура, схема, реестр, права, объект, единицы и диапазоны, время, повторы, порядок</li><li>Ошибочные → журнал отклонённых, к состоянию не применяются</li><li>Значимые события вне очереди координат; координаты объединяются</li></ul></div>
+    <div class="card"><h3>Правило безопасности данных</h3><ul><li><span class="ok">Актуальные</span> · <span class="warn">устаревшие</span> · <span class="unk">отсутствующие</span> · <span class="bad">противоречивые</span> · некорректные</li><li>Устаревшее ≠ «путь свободен»: путь получает статус <b class="unk">«Неизвестно»</b></li><li>Подтверждение зависящих операций блокируется до получения данных</li><li>Ручное уточнение: основание, срок, аудит</li></ul></div>
+  </div>
+  <div class="msg unk">«Данные занятости: путь 3 устарели. Последнее измерение получено 18 секунд назад. Подтверждение приёма на этот путь недоступно.» — время рассчитывается автоматически</div>
+</section>
+
+<section class="slide">
+  <h2>Ограничения не смешиваются</h2>
+  <table>
+    <tr><th>Ограничение</th><th>Единица</th><th>Период</th><th>Правило</th></tr>
+    <tr><td>Месячный план</td><td>вагонов</td><td>месяц</td><td>цель → предупреждение; «жёсткая квота» — отдельная политика</td></tr>
+    <tr><td>Перерабатывающая способность</td><td>ваг./сутки</td><td>сутки</td><td>сумма прибывающих + заявка ≤ норма</td></tr>
+    <tr><td>Пропускная способность входа</td><td>поездов/ч</td><td>скользящий час</td><td>прибытия с направления ≤ норма</td></tr>
+    <tr><td>Вместимость и окно приёма</td><td>интервал</td><td>прибытие + обработка</td><td>путь свободен на весь интервал, длина ≥ состав + запас</td></tr>
+    <tr><td>Ресурсы</td><td>единиц</td><td>операция, смена</td><td>бригада/локомотив свободны, в смене, с учётом перехода</td></tr>
+    <tr><td>Маршрут</td><td>стрелки</td><td>движение</td><td>одно движение через стрелку одновременно</td></tr>
+  </table>
+  <div class="muted">Количество вагонов не заменяет длину: без длины — явный статус «Недостаточно данных».</div>
+</section>
+
+<section class="slide">
+  <h2>Главный сценарий: 40 вагонов в «Алматы (демо)»</h2>
+  <div class="msg warn"><b>1. План выполнен, место есть:</b> «Приём возможен: путь 2… Предупреждение: план месяца уже выполнен (превышение на 769 ваг.). Политика «целевой показатель»». При «жёсткой квоте» — отказ.</div>
+  <div class="msg"><b>2. Пути заняты:</b> «Приём 40 ваг. в 14:30 недоступен: нет подходящего свободного пути на время приёма и обработки. Ближайшее допустимое окно — 17:45». Путь 6 короче состава (560 &lt; 600,8 м), пути 1–5 заняты — с поездами и интервалами.</div>
+  <div class="msg ok"><b>3. Сейчас заполнено, к прибытию освободится:</b> «Путь 2 свободен на весь интервал приёма и обработки 14:30–15:55. Сейчас путь занят…, освободится к 13:57 — до начала приёма».</div>
+  <div class="muted">Конфликтную заявку нельзя подтвердить даже прямым API-запросом: повторная проверка под блокировкой станции + ограничение-исключение PostgreSQL. Две одновременные заявки — один успех, второй отказ (тест).</div>
+</section>
+
+<section class="slide">
+  <h2>Перепланирование: OR-Tools CP-SAT</h2>
+  <div class="grid">
+    <div class="card"><h3>Модель</h3><ul><li>Переменные: начало операций, путь стоянки, конкретная бригада/локомотив, вариант маршрута</li><li>Жёстко: последовательность, «не ранее», пути и запасы, закрытия, окна обслуживания, стрелки, смены, переходы между зонами, ограничения соседей</li></ul></div>
+    <div class="card"><h3>Цель</h3><ul><li>min Σ 10·2<sup>(приоритет−1)</sup>·задержка</li><li>+ штраф за смену пути (согласованная 30, плановая 8)</li><li>+ штраф за сдвиг времени</li><li>Жёсткие ограничения не ослабляются</li></ul></div>
+    <div class="card"><h3>Честность результата</h3><ul><li>Статусы: «оптимальность доказана» / «найден допустимый план» / «не найден за время» / «доказано отсутствие решения»</li><li>Лимит 4 с, независимый валидатор, эвристика-резерв</li><li>Устаревший по версии план не применяется</li></ul></div>
+  </div>
+</section>
+
+<section class="slide">
+  <h2>Индекс эффективности станции</h2>
+  <div class="formula">I = 100 × Σ(wᵢ · sᵢ) / Σwᵢ</div>
+  <table>
+    <tr><th>Составляющая</th><th>Вес</th><th>Нормализация sᵢ</th></tr>
+    <tr><td>Пропускная способность, ваг./ч (окно 4 ч)</td><td>0,25</td><td>min(1, факт / цель)</td></tr>
+    <tr><td>Среднее отклонение от графика, мин</td><td>0,25</td><td>1 − среднее / 45</td></tr>
+    <tr><td>Загрузка путей (актуальная телеметрия)</td><td>0,20</td><td>1 в диапазоне 45–80 %, линейное снижение вне его</td></tr>
+    <tr><td>Конфликты маршрутов и занятости</td><td>0,15</td><td>1 − n / 8</td></tr>
+    <tr><td>Простой локомотивов и бригад сверх резерва 25 %</td><td>0,15</td><td>1 − избыток / (1 − резерв)</td></tr>
+  </table>
+  <div class="muted">Пороги «Норма» ≥ 75, «Внимание» ≥ 50. Нет данных — составляющая исключается, показывается качество оценки. Веса меняются без перекомпиляции, версия и аудит. Индекс ≠ разрешение на движение.</div>
+</section>
+
+<section class="slide" id="perf">
+  <h2>Realtime и производительность (замер)</h2>
+  <div id="perf-body" class="grid"></div>
+  <div class="muted">Стенд: ноутбук Intel Core i5-1250P, 16 логических ядер, 7,6 ГБ ОЗУ; Docker Desktop (WSL2, 3,6 ГБ для VM). Станция: 14 путей, 22 стрелки, 14 ресурсов, ~25 поездов в окне, 43 устройства. Подробности — docs/performance.md.</div>
+</section>
+
+<section class="slide">
+  <h2>Интерфейс: быстрые ответы диспетчеру</h2>
+  <div class="grid">
+    <div class="card"><h3>Что происходит и где проблема</h3><ul><li>Шапка: станция, модельное время, режим, связь, время данных, индекс</li><li>2D-схема ↔ 3D-двойник на одном состоянии</li><li>Конфликты, рекомендации, датчики — отдельной панелью</li></ul></div>
+    <div class="card"><h3>Почему нельзя и что делать</h3><ul><li>У недоступной кнопки — причина рядом</li><li>Проверенные альтернативы с последствиями</li><li>Предпросмотр резервов перед подтверждением</li></ul></div>
+    <div class="card"><h3>Сейчас · История · Прогноз</h3><ul><li>Перемотка 5–15 мин тем же редьюсером</li><li>Прогноз занятости на +15…480 мин</li><li>Цвет всегда дублируется значком; клавиатура; тёмная и светлая темы</li></ul></div>
+  </div>
+</section>
+
+<section class="slide">
+  <h2>Инженерная культура и проверки</h2>
+  <div class="grid">
+    <div class="card"><h3>Автотесты (запущены)</h3><ul><li>41 интеграционный тест backend на PostgreSQL</li><li>Правила плана и вместимости, интервалы, статусы, права</li><li>Конкурентное бронирование, повторная отправка, отмена</li><li>IoT: дубли, порядок, перезапуск, retained, единицы, противоречия, heartbeat, переполнение</li><li>5 и 10 инцидентов, перемотка = сохранённые события, веса индекса</li><li>5 unit-тестов frontend</li></ul></div>
+    <div class="card"><h3>Эксплуатация</h3><ul><li>Docker Compose: БД, MQTT, backend, симулятор, frontend</li><li>Миграции Alembic, воспроизводимые сценарии (seed)</li><li>JSON-логи, метрики p50/p95/max по этапам</li><li>Swagger с русскими описаниями, ADR, docs/</li></ul></div>
+  </div>
+</section>
+
+<section class="slide">
+  <h2>Демонстрация и дальнейшие шаги</h2>
+  <div class="grid">
+    <div class="card"><h3>Live-показ (docs/demo.md)</h3><ol><li>Обзор: 2D/3D, Гант, индекс</li><li>Три ситуации заявки на 40 вагонов</li><li>Потеря датчика → «Неизвестно» → восстановление</li><li>Инцидент → CP-SAT → решение → аудит → перемотка → отчёт</li></ol></div>
+    <div class="card"><h3>Дальше</h3><ul><li>Адаптер реальных устройств и TLS-стенд</li><li>Точнее технология маневров и сортировки</li><li>Планировщик в отдельном процессе</li><li>Проверка ролевой модели специалистами</li><li>E2E-тесты браузера</li></ul></div>
+  </div>
+</section>
+
+<div class="foot"><span>Цифровая станция · демо-MVP</span><span id="pg"></span><span>← → — листать</span></div>
+<script>
+  const slides = [...document.querySelectorAll('.slide')]; let i = 0;
+  const show = (n) => { i = Math.max(0, Math.min(slides.length - 1, n)); slides.forEach((s, k) => s.classList.toggle('on', k === i)); document.getElementById('pg').textContent = `${i + 1} / ${slides.length}`; };
+  document.addEventListener('keydown', (e) => { if (['ArrowRight', 'PageDown', ' '].includes(e.key)) show(i + 1); if (['ArrowLeft', 'PageUp'].includes(e.key)) show(i - 1); });
+  document.addEventListener('click', (e) => { if (e.clientX > innerWidth / 2) show(i + 1); else show(i - 1); });
+  document.getElementById('perf-body').innerHTML = `<div class="card"><h3>Пересчёт плана после сбоя</h3><table><tr><th>Инцидентов</th><th>Статус</th><th>Время</th></tr>
+<tr><td>1</td><td>допустимый план</td><td>4,26 с</td></tr><tr><td>5</td><td>допустимый план</td><td>4,58 с</td></tr>
+<tr><td>10</td><td>допустимый план</td><td>4,27 с</td></tr></table><p class="ok">Требование ≤ 5 с выполнено</p></div>
+<div class="card"><h3>Событие → клиент (300 сообщ./с)</h3><table><tr><th>Этап</th><th>p50</th><th>p95</th><th>max</th></tr>
+<tr><td>Устройство → backend</td><td>41</td><td>124</td><td>162</td></tr>
+<tr><td>Событие → дельта у WS-клиента</td><td>196</td><td>367</td><td>383</td></tr></table>
+<p class="ok">&lt; 500 мс (без отрисовки браузером)</p><p class="muted">Повторы 35 отсечены, очередь без потерь</p></div>
+<div class="card"><h3>API, мс (p50 / p95)</h3><ul><li>Состояние станции: 16 / 25</li><li>Проверка заявки с альтернативами: 46 / 103</li><li>Расписание: 36 / 103</li></ul>
+<p class="muted">Отрисовка в браузере на стенде не измерена: вкладка была в фоне. Механизм замера реализован.</p></div>`;
+  show(0);
+</script>
+</body>
+</html>

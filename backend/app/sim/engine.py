@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.audit import domain_event
 from app.core.timeutil import aware, local_hm, utcnow
@@ -79,7 +80,8 @@ class Engine:
 
     # ------------------------------------------------------------------ события сценария
     def fire_events(self, db: Session, sim: SimState, now: datetime) -> bool:
-        events = list(sim.scheduled_events or [])
+        # копии: изменение вложенных dict «на месте» SQLAlchemy не замечает, и флаг fired не сохранился бы
+        events = [dict(e) for e in (sim.scheduled_events or [])]
         fired = False
         for ev in events:
             if ev.get("fired") or datetime.fromisoformat(ev["at"]) > now:
@@ -96,7 +98,9 @@ class Engine:
                 fired = True
             else:
                 ev["at"] = (now + timedelta(minutes=5)).isoformat()
-        sim.scheduled_events = [dict(e) for e in events]
+        if fired or any(e.get("at") != o.get("at") for e, o in zip(events, sim.scheduled_events or [])):
+            sim.scheduled_events = events
+            flag_modified(sim, "scheduled_events")
         return fired
 
     def _fire(self, db: Session, sim: SimState, ev: dict, now: datetime) -> bool:
@@ -106,6 +110,7 @@ class Engine:
             w = dict(sim.world or {})
             w[ev["key"]] = ev["value"]
             sim.world = w
+            flag_modified(sim, "world")
             domain_event(db, "scenario.world", f"Сценарий: изменено состояние симулятора ({ev['key']})", model_time=now)
             return True
         if t == "device_fault":
@@ -115,6 +120,7 @@ class Engine:
                                        "then": ev.get("then")}
             w["device_faults"] = faults
             sim.world = w
+            flag_modified(sim, "world")
             domain_event(db, "scenario.device_fault",
                          f"Сценарий (симуляция): устройство {ev['device_id']} перестаёт передавать данные на {ev['duration_s']} с",
                          severity="info", model_time=now)
@@ -211,6 +217,14 @@ class Engine:
         faulty_res = {i.object_id for i in model.incidents if i.kind == "resource_failure" and aware(i.start_at) <= now}
         restricted = {i.object_id for i in model.incidents if i.kind == "neighbor_restriction" and aware(i.start_at) <= now}
         unknown = {tid for tid, ds in model.data_states.items() if ds["state"] not in ("actual", "not_monitored")}
+        # путь освобождается для нового заезда только после технологического запаса (как в плане)
+        buf = timedelta(minutes=model.cfg["processing"].get("track_buffer_min", 5))
+        released_at: dict[str, datetime] = {}
+        for o in model.ops.values():
+            if o.status == "done" and o.actual_end and o.kind in ("departure", "shunting"):
+                left = o.track_id if o.kind == "departure" else o.from_track_id
+                if left and (left not in released_at or aware(o.actual_end) > released_at[left]):
+                    released_at[left] = aware(o.actual_end)
         self.waiting = {}
 
         def basis(o: Operation, prev_end):
@@ -240,6 +254,9 @@ class Engine:
                         return f"на {model.track_label_lc(dest)} уже выполняется заезд"
                     if dest in closed:
                         return f"{model.track_label(dest)} закрыт"
+                    rel = released_at.get(dest)
+                    if rel and now < rel + buf and (train is None or standing.get(dest) != train.id):
+                        return f"{model.track_label(dest)}: технологический интервал после освобождения"
                     if dest in unknown and o.kind != "uncoupling":
                         return f"нет достоверных данных о состоянии: {model.track_label_lc(dest)}"
                 if o.kind == "departure" and train and train.destination_station_id in restricted:

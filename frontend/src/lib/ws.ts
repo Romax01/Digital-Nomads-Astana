@@ -52,13 +52,18 @@ export function connect() {
       }
       useStore.setState({ live: applyDelta(s.live, m.delta), version: m.version, lastMsgAt: Date.now() });
       if (m.trace?.event_received_at) {
-        requestAnimationFrame(() => requestAnimationFrame(() => {
+        // Видимая вкладка: до кадра отрисовки (два requestAnimationFrame).
+        // Фоновая вкладка: до обновления DOM (MessageChannel выполняется после синхронной фиксации React
+        // и, в отличие от таймеров и rAF, не замедляется браузером в фоне).
+        const done = () => {
           const render = performance.now() - recvAt;
           const rtt = useStore.getState().rttMs ?? 0;
           const server = (m.server_time - m.trace.event_received_at) * 1000;
-          samples.push({ client_render_ms: render, event_to_screen_ms: server + rtt / 2 + render });
-          if (samples.length >= 10) sock.readyState === 1 && sock.send(JSON.stringify({ type: "metrics", samples: samples.splice(0) }));
-        }));
+          samples.push({ client_render_ms: render, event_to_screen_ms: server + rtt / 2 + render, hidden: document.hidden });
+          if (samples.length >= 10 && sock.readyState === 1) sock.send(JSON.stringify({ type: "metrics", samples: samples.splice(0) }));
+        };
+        if (document.hidden) { const ch = new MessageChannel(); ch.port1.onmessage = done; ch.port2.postMessage(0); }
+        else requestAnimationFrame(() => requestAnimationFrame(done));
       }
     }
   };

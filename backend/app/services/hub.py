@@ -25,7 +25,7 @@ from app.core.audit import domain_event
 from app.core.timeutil import aware, iso, utcnow
 from app.db import SessionLocal
 from app.models import (
-    IdempotencyKey, IndexSnapshot, PlanVersion, Recommendation, Station, StateDelta, StateSnapshot, TelemetryEvent,
+    AuditEvent, IdempotencyKey, IndexSnapshot, PlanVersion, Recommendation, Station, StateDelta, StateSnapshot, TelemetryEvent,
     TelemetryReject,
 )
 from app.services.model import StationModel
@@ -256,6 +256,7 @@ class Hub:
                     db.execute(delete(StateSnapshot).where(StateSnapshot.version < keep))
                 db.execute(delete(IndexSnapshot).where(IndexSnapshot.real_time < now - timedelta(hours=72)))
                 db.execute(delete(IdempotencyKey).where(IdempotencyKey.created_at < now - timedelta(hours=48)))
+                db.execute(delete(AuditEvent).where(AuditEvent.ts < now - timedelta(days=s.audit_retention_days)))
                 db.commit()
         except Exception:
             log.exception("Ошибка очистки истории")
@@ -296,13 +297,17 @@ class Replanner:
         self.reason = reason
         self.event.set()
 
+    MIN_INTERVAL_S = 10.0  # не чаще раза в 10 с: построение модели CP-SAT занимает GIL процесса
+
     def _loop(self):
         s = get_settings()
+        last_run = 0.0
         while True:
             self.event.wait()
-            while time.monotonic() - self.last_trigger < s.replan_debounce_s:
-                time.sleep(0.1)
+            while time.monotonic() - self.last_trigger < s.replan_debounce_s or                     time.monotonic() - last_run < self.MIN_INTERVAL_S:
+                time.sleep(0.2)
             self.event.clear()
+            last_run = time.monotonic()
             if not self.enabled:
                 continue
             try:
@@ -311,39 +316,43 @@ class Replanner:
                 log.exception("Ошибка автоматического перепланирования")
 
     def run_once(self, reason: str, force: bool = False) -> dict | None:
-        from app.core.runtime_lock import world_lock
-        with world_lock:
-            return self._run_once(reason, force)
+        return self._run_once(reason, force)
 
     def _run_once(self, reason: str, force: bool = False) -> dict | None:
+        from app.core.runtime_lock import world_lock
         from app.services.conflicts import detect
         from app.services.planner import run_planner
-        with SessionLocal() as db:
+        # Все обращения к БД — под world_lock и с закрытием транзакции до расчёта: иначе открытая
+        # транзакция планировщика и TRUNCATE при сбросе сценария блокируют друг друга (PostgreSQL
+        # такую межсессионную взаимоблокировку не распознаёт).
+        with SessionLocal() as db, world_lock:
             if db.execute(select(Station).where(Station.kind == "main")).first() is None:
                 return None
             model = StationModel(db)
-            missing = sum(1 for ds in model.data_states.values() if ds["state"] == "missing")
-            if not force and model.data_states and missing > len(model.data_states) / 2:
-                log.info("Перепланирование отложено: нет данных датчиков по %d путям", missing)
-                return None
-            det = detect(model)
-            relevant = [c for c in det["conflicts"] if c["type"] in RESOLVABLE]
-            if not relevant and not force:
-                return None
-            existing = db.execute(select(PlanVersion).where(PlanVersion.status == "proposed",
-                                                            PlanVersion.base_state_version == model.version)).scalars().first()
-            if existing and not force:
-                return None
-            res = run_planner(model, trigger=reason)
+            existing = db.execute(select(PlanVersion.id).where(
+                PlanVersion.status == "proposed", PlanVersion.base_state_version == model.version)).first()
+            db.commit()
+        missing = sum(1 for ds in model.data_states.values() if ds["state"] == "missing")
+        if not force and model.data_states and missing > len(model.data_states) / 2:
+            log.info("Перепланирование отложено: нет данных датчиков по %d путям", missing)
+            return None
+        det = detect(model)
+        relevant = [c for c in det["conflicts"] if c["type"] in RESOLVABLE]
+        if not relevant and not force:
+            return None
+        if existing and not force:
+            return None
+        res = run_planner(model, trigger=reason)  # без блокировок и открытых транзакций
+        with world_lock:
             pv_id = save_plan(model, res, reason, relevant)
-            if pv_id is None:
-                metrics.incr("replan_discarded_stale")
-                self.trigger("retry_after_stale")
-                return None
-            self.last_result = {"plan_id": pv_id, "status": res["status"], "solve_ms": res["solve_ms"]}
-            if self.hub.loop and self.hub.dirty:
-                self.hub.loop.call_soon_threadsafe(self.hub.dirty.set)
-            return {"plan_id": pv_id, **res}
+        if pv_id is None:
+            metrics.incr("replan_discarded_stale")
+            self.trigger("retry_after_stale")
+            return None
+        self.last_result = {"plan_id": pv_id, "status": res["status"], "solve_ms": res["solve_ms"]}
+        if self.hub.loop and self.hub.dirty:
+            self.hub.loop.call_soon_threadsafe(self.hub.dirty.set)
+        return {"plan_id": pv_id, **res}
 
 
 def save_plan(model: StationModel, res: dict, trigger: str, conflicts: list[dict]) -> int | None:
