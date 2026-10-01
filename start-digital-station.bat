@@ -221,13 +221,61 @@ if (-not $ok) { Compose ps; Fail "Программа не ответила за 
 
 $ips = @()
 try { $ips = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop | Where-Object { $_.IPAddress -notmatch "^(127|169\.254)\." -and $_.InterfaceAlias -notmatch "vEthernet|WSL|Docker|Loopback" -and $_.PrefixOrigin -ne "WellKnown" } | ForEach-Object IPAddress) } catch { }
+
 Step "Готово"
 Say "Основное приложение (ПК):   $url" "Green"
 Say "Мобильное приложение:       $url/mobile" "Green"
 if ($lan) { foreach ($ip in $ips) { Say "Из сети (телефоны, ПК):     http://${ip}:$($cfg['DS_FRONTEND_PORT'])   и   http://${ip}:$($cfg['DS_FRONTEND_PORT'])/mobile" "Green" } }
 else { Say "Доступ из сети закрыт (только этот ПК)." "Gray" }
 Say "Логины: station, duty, train, admin, viewer; работники: inspector, pto, fitter, senior. Пароль: demo123" "White"
-Say "Остановить: start-digital-station.bat stop   ·   состояние: ... status   ·   обновить: ... update" "Gray"
-Say "Данные и настройки: $App (.env) и тома Docker проекта $Project" "Gray"
+
 if (-not $env:DS_NOPAUSE) { Start-Process $url | Out-Null }
-exit 0
+
+# ------------------------------------------------------------------ Интерактивное меню команд
+while ($true) {
+  Write-Host ""
+  Write-Host "================== УПРАВЛЕНИЕ СТАНЦИЕЙ ==================" -ForegroundColor Cyan
+  Write-Host "[1] Открыть в браузере (Основное приложение)" -ForegroundColor Yellow
+  Write-Host "[2] Открыть в браузере (Мобильная версия)" -ForegroundColor Yellow
+  if ($lan -and $ips.Count -gt 0) {
+    Write-Host "[3] Открыть сетевой адрес (http://$($ips[0]):$($cfg['DS_FRONTEND_PORT']))" -ForegroundColor Yellow
+  }
+  Write-Host "[S] Показать состояние контейнеров (Status)" -ForegroundColor Yellow
+  Write-Host "[X] Остановить сервис и выйти (Stop)" -ForegroundColor Red
+  Write-Host "[Q] Закрыть консоль (сервер останется работать)" -ForegroundColor Gray
+  Write-Host "--------------------------------------------------------"
+  
+  $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown").Character.ToString().ToLower()
+
+  switch ($key) {
+    "1" { 
+      Start-Process $url | Out-Null 
+      Say "Открываю $url в браузере..." "Green"
+    }
+    "2" { 
+      Start-Process "$url/mobile" | Out-Null 
+      Say "Открываю $url/mobile в браузере..." "Green"
+    }
+    "3" { 
+      if ($lan -and $ips.Count -gt 0) {
+        $netUrl = "http://$($ips[0]):$($cfg['DS_FRONTEND_PORT'])"
+        Start-Process $netUrl | Out-Null
+        Say "Открываю сетевой адрес $netUrl..." "Green"
+      }
+    }
+    "s" { 
+      Step "Состояние контейнеров"
+      Compose ps 
+    }
+    "x" { 
+      Step "Остановка сервиса"
+      Compose stop
+      Say "Сервис остановлен. Данные сохранены." "Green"
+      exit 0 
+    }
+    "q" { 
+      Say "Выход из консоли. Сервер продолжает работать в фоновом режиме." "Gray"
+      exit 0 
+    }
+  }
+}
