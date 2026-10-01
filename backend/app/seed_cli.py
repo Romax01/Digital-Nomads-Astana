@@ -21,7 +21,18 @@ def main():
     logging.basicConfig(level=logging.INFO)
     with session_scope() as db:
         if a.if_empty and db.execute(select(Station)).first():
-            print("Демо-данные уже есть — пропуск.")
+            # данные сохраняются; добавляются только недостающие демо-учётки новых ролей и их привязки
+            from app.models import Wagon
+            from app.sim.seed import SPARE_WAGONS, ensure_demo_scopes, ensure_users, seed_spare_wagons
+            from app.domain.topology import load_config
+            ensure_users(db)
+            main = db.execute(select(Station).where(Station.kind == "main")).scalar_one_or_none()
+            if main:
+                ensure_demo_scopes(db, main.id)
+                if not db.get(Wagon, f"W{SPARE_WAGONS[0][0]}"):
+                    sim = db.get(SimState, 1)
+                    seed_spare_wagons(db, load_config(sim.station_config if sim else s.station_config))
+            print("Демо-данные уже есть — пропуск (учётки работников проверены).")
             return
         sim = reset_world(db, a.config or s.station_config, a.scenario, a.seed if a.seed is not None else s.sim_seed,
                           real_time=s.sim_real_time)

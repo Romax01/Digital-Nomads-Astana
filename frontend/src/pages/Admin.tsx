@@ -66,7 +66,7 @@ function AdminPanel({ perms }: { perms: any }) {
         {users.loading && !users.data ? <Loading /> : users.error ? <ErrorBox error={users.error} retry={users.reload} /> :
           !users.data?.length ? <Empty text="Пользователей нет" /> : (
             <table className="t">
-              <thead><tr><th>Логин</th><th>Имя</th><th>Роль</th><th>Статус</th><th>Действия</th></tr></thead>
+              <thead><tr><th>Логин</th><th>Имя</th><th>Роль</th><th>Станция / ПТО / бригада</th><th>Статус</th><th>Действия</th></tr></thead>
               <tbody>{users.data.map((u: any) => (
                 <tr key={u.id}>
                   <td className="mono">{u.username}{u.id === me?.id && <div className="faint">это вы</div>}</td>
@@ -75,6 +75,7 @@ function AdminPanel({ perms }: { perms: any }) {
                     onChange={(e) => update(u, { role: e.target.value }, `${u.username}: роль изменена`)}>
                     {(roles.data ?? []).filter((r: any) => r.active || r.id === u.role).map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
                   </select></td>
+                  <td><ScopeEditor u={u} onSave={(sc) => update(u, sc, `${u.username}: привязка изменена`)} /></td>
                   <td>{u.active ? <Badge cls="ok" icon="●">активен</Badge> : <Badge cls="bad" icon="✕">заблокирован</Badge>}</td>
                   <td><div className="row wrap">
                     <ActionButton small kind={u.active ? "danger" : ""} onClick={() => update(u, { active: !u.active }, u.active ? `${u.username} заблокирован` : `${u.username} разблокирован`)}>
@@ -138,21 +139,45 @@ function RoleDialog({ perms, dlg, onClose, onDone }: { perms: any; dlg: any; onC
   );
 }
 
+/** Явная привязка пользователя: станция, ПТО / зона, бригада (области видимости сообщений и заданий). */
+function ScopeEditor({ u, onSave }: { u: any; onSave: (sc: any) => void }) {
+  const [edit, setEdit] = useState(false);
+  const [f, setF] = useState({ station_id: u.scope?.station_id ?? "", pto_id: u.scope?.pto_id ?? "", brigade_id: u.scope?.brigade_id ?? "" });
+  if (!edit) return (
+    <button className="btn ghost small" onClick={() => setEdit(true)} title="Изменить привязку">
+      {u.scope ? `${u.scope.station_id} · ${u.scope.pto_id ?? "—"} · ${u.scope.brigade_id ?? "—"}` : <span className="faint">основная станция (по умолчанию)</span>}
+    </button>
+  );
+  return (
+    <div className="row wrap" style={{ gap: 4 }}>
+      <input aria-label="Станция" style={{ width: 70 }} value={f.station_id} onChange={(e) => setF({ ...f, station_id: e.target.value })} placeholder="ALM" />
+      <input aria-label="ПТО" style={{ width: 80 }} value={f.pto_id} onChange={(e) => setF({ ...f, pto_id: e.target.value })} placeholder="ПТО" />
+      <input aria-label="Бригада" style={{ width: 70 }} value={f.brigade_id} onChange={(e) => setF({ ...f, brigade_id: e.target.value })} placeholder="BR-1" />
+      <button className="btn small primary" disabled={!f.station_id.trim()} onClick={() => { onSave(f); setEdit(false); }}>✓</button>
+      <button className="btn small" onClick={() => setEdit(false)}>✕</button>
+    </div>
+  );
+}
+
 function UserDialog({ roles, onClose, onDone }: { roles: any[]; onClose: () => void; onDone: () => void }) {
-  const [f, setF] = useState({ username: "", full_name: "", role: roles.find((r) => r.id === "observer")?.id ?? roles[0]?.id, password: "" });
+  const [f, setF] = useState({ username: "", full_name: "", role: roles.find((r) => r.id === "observer")?.id ?? roles[0]?.id, password: "",
+    station_id: "", pto_id: "", brigade_id: "" });
   const [err, setErr] = useState<ApiError | null>(null);
   const key = useState(newKey())[0];
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   return (
     <Modal title="Новый пользователь" onClose={onClose}
       footer={<><button className="btn" onClick={onClose}>Отмена</button><button className="btn primary" disabled={f.password.length < 8 || f.username.length < 3 || f.full_name.length < 2} onClick={async () => {
-        try { await api.post("/api/v1/admin/users", f, key); useStore.getState().toast("ok", `Пользователь ${f.username} создан`); onDone(); } catch (e) { setErr(e as ApiError); }
+        try { await api.post("/api/v1/admin/users", { ...f, station_id: f.station_id || null, pto_id: f.pto_id || null, brigade_id: f.brigade_id || null }, key); useStore.getState().toast("ok", `Пользователь ${f.username} создан`); onDone(); } catch (e) { setErr(e as ApiError); }
       }}>Создать</button></>}>
       <div className="form-grid">
         <label className="f">Логин<input value={f.username} onChange={set("username")} autoComplete="off" /></label>
         <label className="f">Имя (как в журнале)<input value={f.full_name} onChange={set("full_name")} /></label>
         <label className="f">Роль<select value={f.role} onChange={set("role")}>{roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
         <label className="f">Пароль (не менее 8 символов)<input type="password" value={f.password} onChange={set("password")} autoComplete="new-password" /></label>
+        <label className="f">Станция (пусто — основная)<input value={f.station_id} onChange={set("station_id")} placeholder="ALM" /></label>
+        <label className="f">ПТО / зона<input value={f.pto_id} onChange={set("pto_id")} placeholder="PTO" /></label>
+        <label className="f">Бригада<input value={f.brigade_id} onChange={set("brigade_id")} placeholder="BR-1" /></label>
       </div>
       {err && <ErrorBox error={err} />}
       {err?.details?.fields && <ul>{err.details.fields.map((x: any, i: number) => <li key={i}>{x.field}: {x.message}</li>)}</ul>}

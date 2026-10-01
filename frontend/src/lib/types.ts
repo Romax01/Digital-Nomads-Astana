@@ -26,6 +26,9 @@ export interface TrainState {
   delay_min: number; waiting_reason?: string | null; current_op?: { id: string; kind: string; label: string } | null;
   next_op?: { id: string; kind: string; label: string; start: string } | null; faulty_wagons: string[];
   wagon_kinds: Dict<number>; pos: TrainPos | null; transfer_request_id?: string | null; conflict_ids: string[];
+  defects?: { id: string; number: number; wagon_id: string | null; wagon_number: string; in_train: boolean; urgency: string;
+    urgency_label: string; status: string; status_label: string; restriction: boolean; fault_open: boolean; condition: string | null;
+    condition_label: string; work_orders: { id: string; number: number; kind_label: string; status: string; status_label: string }[] }[];
   consist?: { loco_length_m: number; source: string; groups: { kind: string; length_m: number | null; count: number; loaded: boolean; faulty: boolean }[] };
 }
 

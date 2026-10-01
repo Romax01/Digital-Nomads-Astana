@@ -72,7 +72,9 @@ def test_reserved_permission_and_system_roles_protected(client, world, auth):
     assert r.status_code == 409 and r.json()["error"]["code"] == "SYSTEM_ROLE_READONLY"
     assert client.delete("/api/v1/admin/roles/admin", headers=_h(adm)).status_code == 409
     roles = client.get("/api/v1/admin/roles", headers=adm).json()
-    assert {r["id"] for r in roles if r["system"]} == {"train_dispatcher", "station_dispatcher", "duty_officer", "admin", "observer"}
+    assert {r["id"] for r in roles if r["system"]} == {"train_dispatcher", "station_dispatcher", "duty_officer", "admin", "observer",
+                                                        "wagon_inspector", "wagon_inspector_repairer", "pto_operator",
+                                                        "rolling_stock_fitter", "senior_wagon_inspector"}
 
 
 def test_last_admin_cannot_be_removed(client, world, auth):

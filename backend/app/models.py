@@ -137,6 +137,8 @@ class Wagon(Base):
     condition: Mapped[str] = mapped_column(String(16), default="ok")  # ok | faulty | in_repair
     position: Mapped[int] = mapped_column(Integer, default=0)
     last_checkpoint: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # путь стоянки вагона вне состава (резерв для замены, отцепленный в депо)
+    track_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
 
 
@@ -169,6 +171,8 @@ class Operation(Base):
     reserved: Mapped[bool] = mapped_column(Boolean, default=True)  # False — требование ещё не спланировано
     plan_version: Mapped[int] = mapped_column(Integer, default=1)
     note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # операция, созданная по заявке на работы (ручной процесс: движок не принимает работы сам)
+    work_order_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
 
     __table_args__ = (Index("ix_operations_train", "train_id", "seq"),)
 
@@ -552,3 +556,146 @@ class SeedPlanCache(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     data: Mapped[dict] = mapped_column(J)
     created_at: Mapped[datetime] = mapped_column(TS)
+
+
+# ====================================================================== мобильный процесс работников
+# Время в этих таблицах — РЕАЛЬНОЕ: сроки ответа людей не ускоряются симуляцией.
+
+class UserScope(Base):
+    """Область доступа пользователя: станция, ПТО и бригада. Без FK на stations: сброс демо-мира
+    пересоздаёт станции, а привязка работников должна сохраняться."""
+
+    __tablename__ = "user_scopes"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    station_id: Mapped[str] = mapped_column(String(16))
+    pto_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    brigade_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+
+class DefectReport(Base):
+    """Сообщение о дефекте. Не равно подтверждённой неисправности и не равно заявке на работы."""
+
+    __tablename__ = "defect_reports"
+    __table_args__ = (UniqueConstraint("author_id", "client_uuid", name="uq_defect_client_uuid"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    number: Mapped[int] = mapped_column(Integer)
+    client_uuid: Mapped[str] = mapped_column(String(64))
+    content_hash: Mapped[str] = mapped_column(String(64))
+    station_id: Mapped[str] = mapped_column(String(16), index=True)
+    pto_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    author_id: Mapped[str] = mapped_column(String(32))
+    wagon_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)  # None — привязка не выполнена
+    wagon_number_raw: Mapped[str] = mapped_column(String(16))
+    train_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    track_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    category: Mapped[str] = mapped_column(String(32))
+    component: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    description: Mapped[str] = mapped_column(Text)
+    urgency: Mapped[str] = mapped_column(String(16))  # normal | urgent | critical
+    status: Mapped[str] = mapped_column(String(16))
+    restriction_active: Mapped[bool] = mapped_column(Boolean, default=False)  # временное ограничение до проверки
+    fault_open: Mapped[bool] = mapped_column(Boolean, default=False)  # подтверждённая неисправность не устранена
+    blocking: Mapped[bool] = mapped_column(Boolean, default=True)  # неисправность запрещает отправление вагона
+    decision: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duplicate_of: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    location: Mapped[dict | None] = mapped_column(J, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TS)
+    client_created_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    acknowledged_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(TS)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class WorkOrder(Base):
+    """Заявка на работы: осмотр, ремонт без отцепки, отцепка и ремонт, замена вагона, передача."""
+
+    __tablename__ = "work_orders"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    number: Mapped[int] = mapped_column(Integer)
+    station_id: Mapped[str] = mapped_column(String(16), index=True)
+    pto_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    defect_report_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    wagon_id: Mapped[str] = mapped_column(String(32), index=True)
+    kind: Mapped[str] = mapped_column(String(24))
+    status: Mapped[str] = mapped_column(String(24))
+    hold_from: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    hold_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    brigade_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    assignee_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    executed_by: Mapped[list] = mapped_column(J, default=list)  # кто фактически выполнял работы
+    actions: Mapped[list] = mapped_column(J, default=list)
+    due_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    replacement_wagon_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    operation_ids: Mapped[list] = mapped_column(J, default=list)
+    report: Mapped[str | None] = mapped_column(Text, nullable=True)
+    materials: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(TS)
+    started_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(TS)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class WorkInspection(Base):
+    """Контрольный осмотр результата работ. Выполняет не исполнитель."""
+
+    __tablename__ = "work_inspections"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    work_order_id: Mapped[str] = mapped_column(String(32), index=True)
+    inspector_id: Mapped[str] = mapped_column(String(32))
+    result: Mapped[str] = mapped_column(String(16))  # accepted | rework
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(TS)
+
+
+class WorkEvent(Base):
+    """Хронология сообщения или заявки: смены статуса, замечания, уточнения, назначения."""
+
+    __tablename__ = "work_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    entity_type: Mapped[str] = mapped_column(String(16))  # defect | work_order
+    entity_id: Mapped[str] = mapped_column(String(32), index=True)
+    user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    user_name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(24))
+    from_status: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    to_status: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(TS)
+
+
+class Attachment(Base):
+    """Метаданные вложения. Файл лежит в постоянном томе ATTACHMENTS_DIR под безопасным именем."""
+
+    __tablename__ = "attachments"
+    __table_args__ = (UniqueConstraint("uploader_id", "client_uuid", name="uq_attachment_client_uuid"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    client_uuid: Mapped[str] = mapped_column(String(64))
+    uploader_id: Mapped[str] = mapped_column(String(32))
+    owner_type: Mapped[str | None] = mapped_column(String(16), nullable=True)  # defect | work_order; None — не привязано
+    owner_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    original_name: Mapped[str] = mapped_column(String(120))
+    content_type: Mapped[str] = mapped_column(String(48))
+    size: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    storage_name: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(TS)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text, default="")
+    entity_type: Mapped[str] = mapped_column(String(16))
+    entity_id: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(TS)
+    read_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)

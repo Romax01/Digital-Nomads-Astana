@@ -19,20 +19,33 @@ from app.core.errors import Forbidden
 from app.core.security import current_user
 from app.models import Role, User
 
-SYSTEM_ROLES = {
+DESK_ROLES = {
     "train_dispatcher": "Поездной диспетчер",
     "station_dispatcher": "Станционный диспетчер",
     "duty_officer": "Дежурный по станции",
     "admin": "Администратор",
     "observer": "Наблюдатель",
 }
+# Рабочие роли мобильного раздела /mobile. Названия профессий — по публикациям кадрового портала
+# ҚТЖ; набор прав — продуктовая модель MVP, а не нормативные полномочия (docs/mobile.md).
+MOBILE_ROLES = {
+    "wagon_inspector": "Осмотрщик вагонов",
+    "wagon_inspector_repairer": "Осмотрщик-ремонтник вагонов",
+    "pto_operator": "Оператор ПТО",
+    "rolling_stock_fitter": "Слесарь по ремонту подвижного состава",
+    "senior_wagon_inspector": "Старший осмотрщик-ремонтник вагонов",
+}
+SYSTEM_ROLES = {**DESK_ROLES, **MOBILE_ROLES}
 ROLES = SYSTEM_ROLES  # совместимость
+
+_INSP = {"wagon_inspector", "wagon_inspector_repairer", "senior_wagon_inspector"}
 
 # действие -> (описание, системные роли)
 PERMISSIONS: dict[str, tuple[str, set[str]]] = {
-    "state.view": ("Просмотр состояния, расписания, журнала", set(SYSTEM_ROLES)),
-    "report.export": ("Выгрузка мини-отчёта", set(SYSTEM_ROLES)),
-    "assistant.ask": ("Вопросы помощнику", set(SYSTEM_ROLES)),
+    # рабочие роли НЕ получают state.view: полный снимок станции им не выдаётся (ни по REST, ни по WS)
+    "state.view": ("Просмотр состояния, расписания, журнала", set(DESK_ROLES)),
+    "report.export": ("Выгрузка мини-отчёта", set(DESK_ROLES)),
+    "assistant.ask": ("Вопросы помощнику", set(DESK_ROLES)),
     "request.create": ("Создание заявки между станциями", {"train_dispatcher", "station_dispatcher"}),
     "request.check": ("Проверка приёма по заявке", {"train_dispatcher", "station_dispatcher", "duty_officer"}),
     "request.confirm": ("Подтверждение заявки и резервирование", {"duty_officer"}),
@@ -49,6 +62,20 @@ PERMISSIONS: dict[str, tuple[str, set[str]]] = {
     "config.manage": ("Конфигурация индекса, политик и порогов", {"admin"}),
     "users.manage": ("Управление пользователями и ролями", {"admin"}),
     "api.docs": ("Описание API (Swagger / OpenAPI)", {"admin"}),
+    # ---- мобильный процесс «дефект → решение → работы → приёмка»
+    "mobile.access": ("Мобильный раздел работников", set(MOBILE_ROLES) | {"station_dispatcher"}),
+    "defect.create": ("Сообщение о дефекте вагона", _INSP),
+    "defect.view_own": ("Просмотр своих сообщений", _INSP),
+    "defect.view_station": ("Очередь сообщений своей станции / ПТО",
+                            {"pto_operator", "senior_wagon_inspector", "station_dispatcher", "duty_officer"}),
+    "defect.triage": ("Приём, уточнение, привязка, отклонение и объединение сообщений",
+                      {"pto_operator", "station_dispatcher"}),
+    "work_order.create": ("Решение по сообщению и создание заявки на работы", {"station_dispatcher"}),
+    "work_order.assign": ("Назначение исполнителя заявки", {"senior_wagon_inspector", "station_dispatcher"}),
+    "work_order.execute": ("Выполнение назначенных работ",
+                           {"wagon_inspector", "wagon_inspector_repairer", "rolling_stock_fitter", "senior_wagon_inspector"}),
+    "work_order.inspect": ("Контрольный осмотр и приёмка результата работ", {"senior_wagon_inspector"}),
+    "wagon_replacement.approve": ("Согласование замены вагона в составе", {"station_dispatcher"}),
 }
 # права, которые нельзя выдать пользовательской роли
 RESERVED_ACTIONS = {"users.manage", "api.docs"}

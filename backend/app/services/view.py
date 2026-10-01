@@ -121,6 +121,9 @@ def build_view(db: Session, model: StationModel, engine_waiting: dict, index: di
             "conflict_ids": conflict_objs.get(tid, []),
         }
 
+    # ---- согласованный статус вагонов: сообщения о дефектах и работы (источник — процесс работников)
+    defects_by_train = _defects_by_train(db)
+
     # ---- поезда и операции
     trains = {}
     for tid, t in model.trains.items():
@@ -142,7 +145,8 @@ def build_view(db: Session, model: StationModel, engine_waiting: dict, index: di
             "delay_min": delays.get(tid, 0), "waiting_reason": engine_waiting.get(tid),
             "current_op": {"id": cur.id, "kind": cur.kind, "label": KIND_LABEL.get(cur.kind)} if cur else None,
             "next_op": {"id": nxt.id, "kind": nxt.kind, "label": KIND_LABEL.get(nxt.kind), "start": iso(fc.get(nxt.id, (nxt.planned_start,))[0])} if nxt else None,
-            "faulty_wagons": [w.number for w in wl if w.condition == "faulty"],
+            "faulty_wagons": [w.number for w in wl if w.condition in ("faulty", "restricted")],
+            "defects": defects_by_train.get(tid, []),
             "wagon_kinds": _kinds(wl), "pos": train_position(model, t, ops), "consist": _consist(t, wl),
             "transfer_request_id": t.transfer_request_id, "conflict_ids": conflict_objs.get(tid, []),
         }
@@ -364,6 +368,31 @@ def network_view(model: StationModel, trains: dict, kpi: dict, incidents: dict) 
     return {"source": net["source"], "trains": out, "stations": stations}
 
 
+def _defects_by_train(db) -> dict:
+    from app.models import DefectReport, Wagon, WorkOrder
+    from app.services.workflow import DEFECT_STATUS, URGENCY, WAGON_CONDITION, WO_KIND, WO_STATUS
+    out: dict = {}
+    rows = db.execute(select(DefectReport).where(
+        DefectReport.status.not_in(["rejected", "duplicate"]),
+        (DefectReport.status != "accepted") | DefectReport.fault_open | DefectReport.restriction_active)).scalars()
+    for r in rows:
+        w = db.get(Wagon, r.wagon_id) if r.wagon_id else None
+        tid = (w.train_id if w else None) or r.train_id
+        if not tid:
+            continue
+        wos = [{"id": x.id, "number": x.number, "kind_label": WO_KIND[x.kind], "status": x.status,
+                "status_label": WO_STATUS[x.status]} for x in db.execute(
+            select(WorkOrder).where(WorkOrder.defect_report_id == r.id, WorkOrder.status != "cancelled")).scalars()]
+        out.setdefault(tid, []).append({
+            "id": r.id, "number": r.number, "wagon_id": r.wagon_id, "wagon_number": r.wagon_number_raw,
+            "in_train": bool(w and w.train_id == tid), "urgency": r.urgency, "urgency_label": URGENCY[r.urgency],
+            "status": r.status, "status_label": DEFECT_STATUS[r.status], "restriction": r.restriction_active,
+            "fault_open": r.fault_open, "condition": w.condition if w else None,
+            "condition_label": WAGON_CONDITION.get(w.condition, w.condition) if w else "вагон не привязан",
+            "work_orders": wos})
+    return out
+
+
 def _consist(t, wl) -> dict:
     """Состав в порядке от локомотива: группы подряд идущих однотипных вагонов (RLE).
     Число и длины вагонов — из данных; 3D не меняет ни количество, ни длину."""
@@ -372,7 +401,7 @@ def _consist(t, wl) -> dict:
     if wl:
         for w in sorted(wl, key=lambda w: w.position):
             ln = round(w.length_m or 0, 2) or None
-            key = [w.kind, ln, bool(w.loaded), w.condition == "faulty"]
+            key = [w.kind, ln, bool(w.loaded), w.condition in ("faulty", "restricted")]
             if groups and groups[-1][:2] == key[:2] and groups[-1][3:5] == key[2:]:
                 groups[-1][2] += 1
             else:

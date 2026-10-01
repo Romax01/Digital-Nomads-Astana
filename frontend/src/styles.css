@@ -207,3 +207,14 @@ details > summary { cursor: pointer; color: var(--accent); }
   .nav-link { white-space: nowrap; } .nav-sep { display: none; }
   .grid2 { grid-template-columns: 1fr; } .page { padding: 10px; }
 }
+
+/* Сообщения работников (кабинет) и уведомления */
+.work-page { display: flex; flex-direction: column; gap: 10px; height: 100%; }
+.work-grid { display: grid; grid-template-columns: minmax(320px, 420px) minmax(0, 1fr); gap: 10px; min-height: 0; flex: 1; }
+.work-list { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 170px); }
+.work-list .item.sel { background: var(--panel-3); box-shadow: inset 4px 0 0 var(--accent); }
+.work-card { overflow: auto; max-height: calc(100vh - 170px); }
+.bell { position: relative; }
+.bell-pop { position: absolute; right: 0; top: 36px; width: min(380px, 92vw); max-height: 70vh; overflow: auto; z-index: 60; box-shadow: var(--shadow); }
+.bell-pop .item.unread { box-shadow: inset 4px 0 0 var(--info); }
+@media (max-width: 1100px) { .work-grid { grid-template-columns: 1fr; } .work-list, .work-card { max-height: none; } }

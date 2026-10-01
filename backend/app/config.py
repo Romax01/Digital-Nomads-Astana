@@ -23,7 +23,8 @@ class Settings(BaseSettings):
 
     sim_world_token: str = "sim_world_dev_token"
     sim_autostart: bool = True
-    sim_real_time: bool = False  # заполнение при первом запуске в режиме реального времени
+    sim_real_time: bool = False
+    attachments_dir: str = "/data/attachments"  # постоянный том для фотографий (метаданные — в PostgreSQL)  # заполнение при первом запуске в режиме реального времени
     sim_seed: int = 42
     sim_tick_seconds: float = 1.0
     seed_optimize: bool = True  # оптимизировать начальный план рабочих сценариев (детерминированно)

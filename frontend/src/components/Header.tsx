@@ -1,3 +1,4 @@
+import { NotificationsBell } from "../pages/Work";
 import { useEffect, useState } from "react";
 import { setToken } from "../lib/api";
 import { fmtHM, fmtHMS, tzLabel } from "../lib/format";
@@ -61,6 +62,7 @@ export default function Header() {
         <small>{age !== null ? `данные: ${fmtHMS(new Date(lastMsgAt).toISOString())} (реальное время)` : "данных ещё нет"}</small>
       </div>
       {conn === "offline" && <button className="btn small" onClick={reconnectNow}>Переподключиться</button>}
+      {user && <NotificationsBell />}
       <button className="btn ghost small" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Сменить тему">
         {theme === "dark" ? "☀ Светлая" : "☾ Тёмная"}
       </button>

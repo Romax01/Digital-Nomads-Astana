@@ -3,6 +3,8 @@ import { api, ApiError, setToken } from "../lib/api";
 import { ROLE_LABEL } from "../lib/labels";
 import { useStore } from "../lib/store";
 
+const DESK = new Set(["train_dispatcher", "station_dispatcher", "duty_officer", "admin", "observer"]);
+
 export default function Login() {
   const [users, setUsers] = useState<any[]>([]);
   const [username, setUsername] = useState("duty");
@@ -34,9 +36,10 @@ export default function Login() {
             {err && <div className="callout bad" role="alert">{err.message}</div>}
             <button className="btn primary" type="submit" disabled={busy}>Войти</button>
           </form>
+          <a className="btn" href="/mobile" style={{ justifyContent: "center" }}>📱 Мобильное приложение работников ПТО (/mobile)</a>
           <h4 style={{ marginTop: 8 }}>Демонстрационные роли (пароль demo123)</h4>
           <div className="col" style={{ gap: 4 }}>
-            {users.map((u) => (
+            {users.filter((u) => DESK.has(u.role)).map((u) => (
               <button key={u.username} className="btn" style={{ justifyContent: "space-between" }} onClick={() => { setUsername(u.username); submit(u.username); }}>
                 <span><b>{u.username}</b> — {u.full_name}</span><span className="muted">{u.role_label ?? ROLE_LABEL[u.role]}</span>
               </button>

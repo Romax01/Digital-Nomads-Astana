@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.audit import audit, domain_event
@@ -81,7 +81,10 @@ def create_incident(db: Session, user: User | None, kind: str, object_id: str | 
         w = db.get(Wagon, object_id)
         if not w:
             raise NotFound("WAGON_NOT_FOUND", f"Вагон {object_id} не найден.")
-        return register_faulty_wagon(db, w, source=user.full_name if user else "система", model_time=now, user=user)
+        if user is not None:
+            # действие пользователя: сообщение → решение → работы → контрольный осмотр (без автоприёмки)
+            return report_faulty_wagon_by_user(db, user, w, description or "", now)
+        return register_faulty_wagon(db, w, source="система", model_time=now, user=None)
 
     inc = Incident(id=_id("INC"), station_id=station.id, kind=kind,
                    title=title or f"{KIND_LABELS[kind]}: {label}",
@@ -111,9 +114,47 @@ def _cargo_op(db: Session, object_id: str | None) -> Operation | None:
     return ops[0] if ops else None
 
 
+def report_faulty_wagon_by_user(db: Session, user: User, w: Wagon, details: str, now: datetime) -> Incident:
+    """Диспетчер сообщает о неисправном вагоне из кабинета. Создаётся сообщение о дефекте с
+    временным ограничением (вагон не может уйти со станцией до решения) и инцидент-запись в журнале.
+    Отцепка и ремонт назначаются решением по сообщению; устранение подтверждает контрольный осмотр."""
+    from app.models import DefectReport
+    from app.services import workflow as wf
+    station = db.execute(select(Station).where(Station.kind == "main")).scalar_one()
+    train = db.get(Train, w.train_id) if w.train_id else None
+    num = (db.execute(select(func.coalesce(func.max(DefectReport.number), 0))).scalar() or 0) + 1
+    t = utcnow()
+    r = DefectReport(id=wf._uid("DR"), number=num, client_uuid=f"desk-{uuid.uuid4().hex}", content_hash="desk",
+                     station_id=station.id, author_id=user.id, wagon_id=w.id, wagon_number_raw=w.number,
+                     train_id=train.id if train else None, track_id=train.current_track_id if train else w.track_id,
+                     position=w.position if train else None, category="other", component=None,
+                     description=details or "Неисправность зарегистрирована диспетчером в кабинете",
+                     urgency="urgent", status="under_review", restriction_active=True, created_at=t, updated_at=t,
+                     acknowledged_at=t, acknowledged_by=user.id, version=1)
+    db.add(r)
+    inc = Incident(id=_id("INC"), station_id=station.id, kind="faulty_wagon",
+                   title=f"Неисправный вагон № {w.number}" + (f" в составе поезда № {train.number}" if train else ""),
+                   description=f"Источник: {user.full_name}. Сообщение № {num}: решение — в разделе «Сообщения работников».",
+                   object_type="wagon", object_id=w.id, start_at=now, end_at=None, status="active", severity="high",
+                   params={"train_id": train.id if train else None, "source": user.full_name, "defect_report_id": r.id,
+                           "mode": "workflow"}, created_by=user.id, created_at=utcnow())
+    db.add(inc)
+    wf._event(db, "defect", r.id, user, "status", None, "under_review", "Зарегистрировано диспетчером; ограничение до решения")
+    db.flush()
+    wf.recompute_wagon(db, w)
+    audit(db, user, "incident.create", "incident", inc.id, inc.title, after={"wagon": w.number, "defect_report": r.id},
+          model_time=now)
+    domain_event(db, "incident.created", f"{inc.title}. Требуется решение по сообщению № {num}.", severity="warning",
+                 payload={"incident_id": inc.id, "kind": "faulty_wagon", "defect_report_id": r.id}, model_time=now)
+    wf._changed(db, "defect", r.id, station.id)
+    bump(db, "incident:faulty_wagon")
+    return inc
+
+
 def register_faulty_wagon(db: Session, w: Wagon, *, source: str, model_time: datetime | None,
                           details: str = "", user: User | None = None) -> Incident:
-    """Неисправный вагон: требуется отцепка и ремонт до отправления состава.
+    """Сценарный режим (демо-сценарии, диагностический комплекс): требуется отцепка и ремонт до
+    отправления; ремонт демо-инцидента завершает движок. Ручные работы работников так не принимаются.
 
     Новые операции создаются как «требования без резерва» (reserved=False); их размещение во
     времени и ресурсах выполняет планировщик, а до этого детектор показывает конфликт."""
@@ -127,7 +168,7 @@ def register_faulty_wagon(db: Session, w: Wagon, *, source: str, model_time: dat
                    title=f"Неисправный вагон № {w.number}" + (f" в составе поезда № {train.number}" if train else ""),
                    description=f"Источник: {source}. {details}".strip(), object_type="wagon", object_id=w.id,
                    start_at=now, end_at=None, status="active", severity="high",
-                   params={"train_id": train.id if train else None, "source": source},
+                   params={"train_id": train.id if train else None, "source": source, "mode": "scenario"},
                    created_by=user.id if user else None, created_at=utcnow())
     db.add(inc)
     if train and depot:
@@ -198,12 +239,21 @@ def resolve_incident(db: Session, user: User | None, incident_id: str, reason: s
     if not inc:
         raise NotFound("INCIDENT_NOT_FOUND", "Инцидент не найден.")
     now = _now(db)
+    if inc.kind == "faulty_wagon" and (inc.params or {}).get("defect_report_id"):
+        from app.models import DefectReport
+        r = db.get(DefectReport, inc.params["defect_report_id"])
+        if r and (r.fault_open or r.restriction_active or r.status in ("submitted", "acknowledged", "under_review", "needs_info")):
+            raise AppError("DEFECT_NOT_CLOSED", "Закрыть инцидент нельзя: неисправность по сообщению № "
+                           f"{r.number} ещё не устранена и не принята контрольным осмотром.", status=409,
+                           hint="Устранение подтверждает проверяющий по заявке на работы (раздел «Сообщения работников»).")
     transition("incident", inc, "resolved")
     inc.end_at = now if not inc.end_at or aware(inc.end_at) > now else inc.end_at
     if inc.kind == "faulty_wagon":
         w = db.get(Wagon, inc.object_id)
-        if w and w.condition == "faulty":
-            w.condition = "ok"
+        if w:
+            db.flush()
+            from app.services.workflow import recompute_wagon
+            recompute_wagon(db, w)  # состояние вагона — по всем его дефектам, не по одному инциденту
     audit(db, user, "incident.resolve", "incident", inc.id, f"Инцидент «{inc.title}» устранён", reason=reason,
           model_time=now)
     domain_event(db, "incident.resolved", f"Устранён: {inc.title}", payload={"incident_id": inc.id}, model_time=now)

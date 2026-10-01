@@ -118,12 +118,18 @@ class UserCreateIn(BaseModel):
     full_name: str = Field(min_length=2, max_length=120, description="ФИО / подпись в журнале")
     role: str = Field(description="Идентификатор роли")
     password: str = Field(min_length=8, max_length=128, description="Пароль, не менее 8 символов")
+    station_id: str | None = Field(default=None, max_length=16, description="Станция (область доступа)")
+    pto_id: str | None = Field(default=None, max_length=32, description="ПТО / зона")
+    brigade_id: str | None = Field(default=None, max_length=32, description="Бригада")
 
 
 class UserUpdateIn(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=120)
     role: str | None = None
     active: bool | None = None
+    station_id: str | None = Field(default=None, max_length=16)
+    pto_id: str | None = Field(default=None, max_length=32)
+    brigade_id: str | None = Field(default=None, max_length=32)
 
 
 class PasswordIn(BaseModel):

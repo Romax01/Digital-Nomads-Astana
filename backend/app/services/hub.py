@@ -43,6 +43,7 @@ class Client:
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=200)
         self.need_snapshot = False
         self.rtt_ms: float | None = None
+        self.limited = False  # только события процесса работников (без снимка станции)
 
 
 class Hub:
@@ -69,7 +70,52 @@ class Hub:
         self.running = False
 
     # ------------------------------------------------------------- шина
+    def push_work_event(self, topic: str, payload: dict):
+        """Событие процесса работников — только тем клиентам, кому объект виден по правилам REST."""
+        if not self.loop:
+            return
+        from app.models import DefectReport, WorkOrder
+        from app.services import workflow as wf
+        targets = []
+        try:
+            with SessionLocal() as db:
+                obj = None
+                if topic == "work_changed":
+                    obj = (db.get(DefectReport, payload["entity_id"]) if payload["entity_type"] == "defect"
+                           else db.get(WorkOrder, payload["entity_id"]))
+                for c in list(self.clients):
+                    u = db.get(type(c.user), c.user.id)
+                    if not u or not u.active:
+                        continue
+                    if topic == "notification":
+                        ok = payload.get("user_id") == u.id
+                    elif obj is None:
+                        ok = False
+                    elif payload["entity_type"] == "defect":
+                        ok = wf.can_view_defect(db, u, obj)
+                    else:
+                        ok = wf.can_view_wo(db, u, obj)
+                    if ok:
+                        targets.append(c)
+        except Exception:
+            log.exception("Ошибка рассылки события работников")
+            return
+        msg = json.dumps({"type": "work", "topic": topic, **({k: payload[k] for k in ("entity_type", "entity_id")}
+                                                            if topic == "work_changed" else {}),
+                          "server_time": time.time()}, ensure_ascii=False)
+
+        def put():
+            for c in targets:
+                try:
+                    c.queue.put_nowait(msg)
+                except asyncio.QueueFull:
+                    pass
+        self.loop.call_soon_threadsafe(put)
+
     def on_bus(self, topic: str, payload: dict):
+        if topic in ("work_changed", "notification"):
+            self.push_work_event(topic, payload)
+            return
         if topic == "telemetry_applied" and payload.get("received_wall"):
             with self._lock:
                 if self.trace_received_at is None:
@@ -223,7 +269,7 @@ class Hub:
         if msg.get("trace") and msg["trace"].get("event_received_at"):
             metrics.observe("event_to_ws_ms", (sent_at - msg["trace"]["event_received_at"]) * 1000)
         for c in list(self.clients):
-            if c.need_snapshot:
+            if c.need_snapshot or c.limited:  # работникам состояние станции не рассылается
                 continue
             try:
                 c.queue.put_nowait(text)
@@ -263,6 +309,10 @@ class Hub:
                     db.execute(delete(StateSnapshot).where(StateSnapshot.version < keep))
                 db.execute(delete(IndexSnapshot).where(IndexSnapshot.real_time < now - timedelta(hours=72)))
                 db.execute(delete(IdempotencyKey).where(IdempotencyKey.created_at < now - timedelta(hours=48)))
+                from app.api.work import cleanup_attachments
+                from app.services.workflow import check_overdue
+                cleanup_attachments(db)
+                check_overdue(db)
                 db.execute(delete(AuditEvent).where(AuditEvent.ts < now - timedelta(days=s.audit_retention_days)))
                 db.commit()
         except Exception:

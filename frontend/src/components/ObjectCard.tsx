@@ -217,6 +217,19 @@ function TrainCard({ st, id, incReason }: { st: ViewState; id: string; incReason
         {t.waiting_reason && <><dt>Ожидает</dt><dd className="warn">{t.waiting_reason}</dd></>}
         {t.faulty_wagons.length > 0 && <><dt>Неисправные вагоны</dt><dd className="bad">⚠ № {t.faulty_wagons.join(", ")}</dd></>}
       </dl>
+      {(t.defects?.length ?? 0) > 0 && (
+        <div className="col" style={{ gap: 6 }}>
+          <h4>Дефекты и работы (сообщения работников)</h4>
+          {t.defects!.map((d) => (
+            <a key={d.id} className={`callout ${d.restriction || d.fault_open ? "bad" : "warn"}`} href={`/work?report=${d.id}`}
+              onClick={(e) => { e.preventDefault(); history.pushState({}, "", `/work?report=${d.id}`); dispatchEvent(new PopStateEvent("popstate")); }}>
+              <b>Вагон № {d.wagon_number}{d.in_train ? "" : " (уже не в составе)"}: {d.condition_label}</b>
+              <div>Сообщение № {d.number} · {d.urgency_label} · {d.status_label}{d.restriction ? " · ⛔ ограничение до проверки" : ""}</div>
+              {d.work_orders.map((w) => <div key={w.id} className="faint">Заявка № {w.number}: {w.kind_label} — {w.status_label}</div>)}
+            </a>
+          ))}
+        </div>
+      )}
       <ConflictList st={st} ids={t.conflict_ids} />
       <h4>Операции поезда</h4>
       <OpsTable st={st} filter={(o) => o.train_id === t.id} />

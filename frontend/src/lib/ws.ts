@@ -40,6 +40,10 @@ export function connect() {
       useStore.setState({ lastMsgAt: Date.now() });
       return;
     }
+    if (m.type === "work") {
+      useStore.setState({ workSeq: s.workSeq + 1 }); // экраны «Сообщения работников» перечитывают данные
+      return;
+    }
     if (m.type === "snapshot") {
       useStore.setState({ live: m.state, version: m.version, lastMsgAt: Date.now() });
       return;

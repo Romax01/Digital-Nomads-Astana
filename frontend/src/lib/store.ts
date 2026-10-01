@@ -29,6 +29,7 @@ interface Store {
   highlight: { ids: string[]; source: string } | null; setHighlight: (h: Store["highlight"]) => void;
   panels: { right: boolean; bottom: boolean; ganttFull: boolean; fullscreen: boolean };
   setPanels: (p: Partial<Store["panels"]>) => void;
+  workSeq: number; // событие процесса работников (WS) — экраны сообщений перечитывают данные
   toasts: Toast[]; toast: (kind: Toast["kind"], text: string, hint?: string) => void; dismiss: (id: number) => void;
   theme: "dark" | "light"; setTheme: (t: "dark" | "light") => void;
 }
@@ -57,6 +58,7 @@ export const useStore = create<Store>((set) => ({
     try { localStorage.setItem("ds_panels", JSON.stringify({ right: panels.right, bottom: panels.bottom, ganttFull: panels.ganttFull })); } catch { /* */ }
     return { panels };
   }),
+  workSeq: 0,
   toasts: [],
   toast: (kind, text, hint) => {
     const id = toastId++;

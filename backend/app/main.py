@@ -68,6 +68,8 @@ TAGS = [
     {"name": "Индекс", "description": "Индекс эффективности станции и его конфигурация."},
     {"name": "Симуляция", "description": "Модельное время и демонстрационные сценарии."},
     {"name": "История", "description": "Перемотка: снимки и дельты состояния."},
+    {"name": "Работники: дефекты и ремонт", "description": "Мобильный раздел: сообщения о дефектах, заявки на работы, "
+     "контрольный осмотр, вложения, уведомления. Права и области доступа проверяются на сервере."},
 ]
 
 app = FastAPI(
@@ -157,4 +159,6 @@ from app.api.routes import router as api_router  # noqa: E402
 from app.api.ws import router as ws_router  # noqa: E402
 
 app.include_router(api_router)
+from app.api.work import router as work_router  # noqa: E402
+app.include_router(work_router)
 app.include_router(ws_router)

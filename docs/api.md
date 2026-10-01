@@ -140,3 +140,32 @@ curl -X POST http://localhost:8080/api/v1/admin/roles -H "Authorization: Bearer 
 Без прав администратора `/docs` возвращает страницу 403, а `/openapi.json` — ошибку `FORBIDDEN`. `/redoc` не существует.
 
 Наружу (в сеть) публикуется только порт интерфейса 8080. Backend (8000) и PostgreSQL (5432) привязаны к `127.0.0.1`, поэтому закрытие Swagger нельзя обойти прямым обращением к backend из сети. MQTT 1883 доступен в сети для подключения устройств: анонимный доступ запрещён, права на топики заданы ACL.
+
+
+## Процесс работников (мобильный раздел)
+
+Подробно — [mobile.md](mobile.md). Все команды проверяют на сервере:
+- право;
+- область доступа (станция / ПТО / бригада);
+- назначение;
+- статус.
+
+Чужие объекты возвращают 404. Изменяющие команды принимают `Idempotency-Key` и `expected_version`; при несовпадении версии — 409 `STALE_VERSION`.
+
+| Метод и путь | Право | Назначение |
+|---|---|---|
+| GET `/mobile/context` | mobile.access | пользователь, роль, права, привязка, счётчики, справочники |
+| GET `/mobile/wagons?q=` · `/mobile/trains` · `/mobile/tracks` | defect.create / triage / view_station / work_order.execute | поиск вагона, выбор из состава, пути своей станции |
+| POST `/defect-reports` | defect.create | сообщение; идемпотентно по `client_uuid`; критичное — ограничение вагона |
+| GET `/defect-reports?scope=own\|station&status=&urgency=&track_id=&wagon=&page=` | view_own / view_station | списки с фильтрами и пагинацией |
+| GET `/defect-reports/{id}` | видимость | карточка: вагон, фото, хронология, работы, доступные действия (`allowed`) |
+| POST `/defect-reports/{id}/actions/{acknowledge\|review\|needs_info\|reply\|reject\|duplicate\|link_wagon\|comment}` | по матрице | действия с сообщением |
+| POST `/defect-reports/{id}/decision` | work_order.create (+ wagon_replacement.approve для замены) | принять и создать заявку |
+| POST `/defect-reports/{id}/work-orders` | work_order.create | дополнительная заявка по принятому сообщению |
+| GET `/work-orders?scope=mine\|inspect\|station` · `/work-orders/{id}` · `/work-orders/executors` | execute / inspect / assign / view_station | задания, карточка, исполнители |
+| POST `/work-orders/{id}/actions/{assign\|start\|pause\|resume\|submit\|accept\|rework\|cancel\|comment}` | по матрице | ход работ, контрольный осмотр, отмена |
+| GET `/wagons/{id}/replacement-candidates` | wagon_replacement.approve | подбор исправного вагона с причинами непригодности |
+| POST `/attachments?client_uuid=&filename=` (тело — файл) · GET / DELETE `/attachments/{id}` | загрузчик; доступ к записи | фото JPEG/PNG/WebP до 8 МБ |
+| GET `/notifications` · POST `/notifications/read` | вход | уведомления пользователя |
+
+Роли без `state.view` получают по `/ws` ограниченный канал: `hello_ok` и события `work`. Снимков и дельт станции в нём нет.

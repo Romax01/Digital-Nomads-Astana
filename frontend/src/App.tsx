@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { BrowserRouter, Navigate, NavLink, Route, Routes } from "react-router-dom";
 import Header from "./components/Header";
 import { ForecastBar, ReplayBar } from "./components/Panels";
@@ -18,6 +18,10 @@ import PlanGantt from "./pages/PlanGantt";
 import Requests from "./pages/Requests";
 import Schedule from "./pages/Schedule";
 import Settings from "./pages/Settings";
+import Work from "./pages/Work";
+
+// мобильный раздел работников — отдельный чанк: без 3D и без полного снимка станции
+const MobileApp = lazy(() => import("./mobile/MobileApp"));
 
 function Nav() {
   const live = useStore((s) => s.live);
@@ -25,6 +29,7 @@ function Nav() {
   const nConf = live ? Object.keys(live.conflicts).length : 0;
   const nAlerts = live ? Object.keys(live.alerts).length : 0;
   const nReq = live ? Object.values(live.requests).filter((r: any) => ["new", "checked"].includes(r.status)).length : 0;
+  const nDef = live ? Object.values(live.trains).reduce((a: number, t: any) => a + (t.defects || []).filter((d: any) => d.status === "submitted").length, 0) : 0;
   const link = (to: string, label: string, badge?: React.ReactNode) => (
     <NavLink to={to} end className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>{label}{badge}</NavLink>
   );
@@ -36,6 +41,7 @@ function Nav() {
       {link("/plan", "План и Гант")}
       {link("/load", "Загрузка и индекс")}
       {link("/devices", "Датчики и связь", nAlerts ? <span className="badge unknown">? {nAlerts}</span> : null)}
+      {user?.permissions?.includes("defect.view_station") && link("/work", "Сообщения работников", nDef ? <span className="badge warn">{nDef}</span> : null)}
       {link("/journal", "Журнал")}
       {link("/assistant", "Помощник")}
       <div className="nav-sep" />
@@ -103,6 +109,7 @@ function Shell() {
             <Route path="/journal" element={<Journal />} />
             <Route path="/assistant" element={<Assistant />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/work" element={can(user, "defect.view_station") ? <Work /> : <Navigate to="/" replace />} />
             <Route path="/admin" element={can(user, "users.manage") ? <Admin /> : <Navigate to="/" replace />} />
             <Route path="*" element={<Overview />} />
           </Routes>
@@ -119,6 +126,21 @@ export default function App() {
   useEffect(() => {
     if (getToken() && !user) api.get("/api/v1/auth/me").then((u) => useStore.getState().setUser(u)).catch(() => setToken(null));
   }, []);
+  const mobile = location.pathname.startsWith("/mobile");
+  if (mobile) {
+    return (
+      <BrowserRouter>
+        <Suspense fallback={<div className="state-box">Загрузка…</div>}>
+          <Routes><Route path="/mobile/*" element={<MobileApp />} /></Routes>
+        </Suspense>
+      </BrowserRouter>
+    );
+  }
+  // рабочие роли без доступа к состоянию станции работают в мобильном разделе
+  if (user && !can(user, "state.view") && can(user, "mobile.access")) {
+    location.replace("/mobile");
+    return null;
+  }
   return (
     <BrowserRouter>
       {user ? <Shell /> : <Login />}

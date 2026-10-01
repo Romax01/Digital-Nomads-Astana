@@ -35,6 +35,8 @@ OPERATIONAL_TABLES = [
     "devices", "observations", "telemetry_events", "telemetry_rejects", "manual_overrides",
     "track_connections", "tracks", "topology_nodes", "zones", "parks", "stations", "state_snapshots",
     "state_deltas", "index_snapshots", "domain_events", "idempotency_keys",
+    # процесс работников (сброс демо-мира); привязки пользователей user_scopes сохраняются
+    "defect_reports", "work_orders", "work_inspections", "work_events", "attachments", "notifications",
 ]
 
 DEMO_USERS = [
@@ -43,7 +45,22 @@ DEMO_USERS = [
     ("u-duty", "duty", "Ким В. (дежурный по станции)", "duty_officer"),
     ("u-admin", "admin", "Администратор стенда", "admin"),
     ("u-viewer", "viewer", "Наблюдатель (жюри)", "observer"),
+    # мобильный раздел работников (/mobile)
+    ("u-insp", "inspector", "Бекова А. (осмотрщик вагонов)", "wagon_inspector"),
+    ("u-repairer", "repairer", "Нурланов Е. (осмотрщик-ремонтник)", "wagon_inspector_repairer"),
+    ("u-pto", "pto", "Жумабаева С. (оператор ПТО)", "pto_operator"),
+    ("u-fitter", "fitter", "Ли Д. (слесарь по ремонту подвижного состава)", "rolling_stock_fitter"),
+    ("u-fitter2", "fitter2", "Сапаров М. (слесарь, бригада 2)", "rolling_stock_fitter"),
+    ("u-senior", "senior", "Омаров Т. (старший осмотрщик-ремонтник)", "senior_wagon_inspector"),
+    ("u-senior2", "senior2", "Ким Р. (старший осмотрщик-ремонтник)", "senior_wagon_inspector"),
+    ("u-otr", "otr_inspector", "Ахмедов Б. (осмотрщик, станция Отар)", "wagon_inspector"),
 ]
+# привязка демо-работников: (ПТО, бригада); u-otr — другая станция (проверка изоляции данных)
+DEMO_SCOPES = {"u-insp": ("PTO", None), "u-repairer": ("PTO", "BR-1"), "u-pto": ("PTO", None),
+               "u-fitter": ("PTO", "BR-1"), "u-fitter2": ("PTO", "BR-2"), "u-senior": ("PTO", "BR-1"),
+               "u-senior2": ("PTO", None), "u-otr": ("PTO-OTR", None)}
+SPARE_WAGONS = [("59900011", "gondola"), ("59900029", "gondola"), ("59900037", "covered"), ("59900045", "covered"),
+                ("59900052", "tank"), ("59900060", "hopper")]
 DEMO_PASSWORD = "demo123"
 
 DEFAULT_INDEX_CONFIG = {
@@ -90,11 +107,76 @@ def local_day(cfg, sim=None) -> datetime:
 def ensure_users(db: Session):
     from app.services.admin import ensure_system_roles
     ensure_system_roles(db)
-    if db.execute(select(User)).first():
-        return
-    for uid, un, fn, role in DEMO_USERS:
-        db.add(User(id=uid, username=un, full_name=fn, role=role, password_hash=hash_password(DEMO_PASSWORD)))
+    existing = {u for (u,) in db.execute(select(User.id))}
+    names = {u for (u,) in db.execute(select(User.username))}
+    for uid, un, fn, role in DEMO_USERS:  # недостающие демо-учётки добавляются; изменённые администратором не трогаются
+        if uid not in existing and un not in names:
+            db.add(User(id=uid, username=un, full_name=fn, role=role, password_hash=hash_password(DEMO_PASSWORD)))
     db.flush()
+
+
+def ensure_demo_scopes(db: Session, station_id: str):
+    """Привязка демо-работников к станции, ПТО и бригаде (у созданных администратором — своя)."""
+    from app.models import UserScope
+    for uid, (pto, brigade) in DEMO_SCOPES.items():
+        if not db.get(User, uid):
+            continue
+        st = "OTR" if uid == "u-otr" else station_id
+        sc = db.get(UserScope, uid)
+        if sc is None:
+            db.add(UserScope(user_id=uid, station_id=st, pto_id=pto, brigade_id=brigade))
+        elif uid != "u-otr":
+            sc.station_id = station_id  # смена конфигурации станции — демо-работники переходят вместе с ней
+    db.flush()
+
+
+def seed_spare_wagons(db: Session, cfg: dict):
+    """Резерв исправных порожних вагонов на станции — кандидаты для замены неисправного вагона."""
+    sid = cfg["station"]["id"]
+    tracks = list(db.execute(select(Track).where(Track.station_id == sid)).scalars())
+    place = next((t for t in tracks if t.kind == "repair"), None) or next((t for t in tracks if t.kind in ("sorting", "cargo")), None)
+    for num, kind in SPARE_WAGONS:
+        db.add(Wagon(id=f"W{num}", train_id=None, number=num, kind=kind, length_m=WAGON_LEN[kind], loaded=False,
+                     condition="ok", position=0, track_id=place.id if place else None))
+    db.flush()
+
+
+def seed_demo_reports(db: Session, cfg: dict):
+    """Два воспроизводимых сообщения осмотрщика в очереди (обычное и срочное)."""
+    from app.services import workflow as wf
+    insp = db.get(User, "u-insp")
+    if not insp:
+        return
+    trains = sorted(db.execute(select(Train).where(Train.status == "on_station")).scalars(), key=lambda t: t.number)
+    if not trains:
+        return
+    t = trains[0]
+    wl = sorted(db.execute(select(Wagon).where(Wagon.train_id == t.id)).scalars(), key=lambda w: w.position)
+    samples = [(2, "brake", "Тормозная колодка", "Тормозная колодка изношена до предельной толщины.", "normal"),
+               (5, "axlebox", "Букса правая, 2-я колёсная пара", "Повышенный нагрев буксы, следы смазки на корпусе.", "urgent")]
+    for i, (pos, cat, comp, text, urg) in enumerate(samples):
+        if pos > len(wl):
+            continue
+        w = wl[pos - 1]
+        wf.submit_defect(db, insp, {"client_uuid": f"seed-{cfg['station']['id']}-{i}", "wagon_id": w.id, "wagon_number": w.number,
+                                    "train_id": t.id, "track_id": t.current_track_id, "position": w.position,
+                                    "category": cat, "component": comp, "description": text, "urgency": urg,
+                                    "attachment_ids": [], "location": None})
+    db.flush()
+
+
+def _clear_attachment_files():
+    """Сброс демо-мира удаляет и файлы вложений (метаданные очищены TRUNCATE)."""
+    import os
+    from app.config import get_settings
+    d = get_settings().attachments_dir
+    try:
+        for name in os.listdir(d):
+            p = os.path.join(d, name)
+            if os.path.isfile(p):
+                os.remove(p)
+    except FileNotFoundError:
+        pass
 
 
 def ensure_index_config(db: Session):
@@ -384,6 +466,11 @@ def reset_world(db: Session, config_name: str, scenario: str, seed: int, real_ti
     tb = TimetableBuilder(db, cfg, rnd, t0)
     apply_scenario(db, tb, cfg, scenario, rnd)
     db.flush()
+    ensure_demo_scopes(db, cfg["station"]["id"])
+    seed_spare_wagons(db, cfg)
+    if not scenario.startswith("demo_"):
+        seed_demo_reports(db, cfg)
+    _clear_attachment_files()
     from app.config import get_settings
     if get_settings().seed_optimize and not scenario.startswith("demo_"):
         optimize_initial_plan(db)

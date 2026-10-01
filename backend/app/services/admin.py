@@ -22,7 +22,7 @@ from app.core.permissions import (BASE_ACTIONS, PERMISSIONS, RESERVED_ACTIONS, S
                                   role_label, role_permissions)
 from app.core.security import hash_password
 from app.core.timeutil import iso, utcnow
-from app.models import Role, User
+from app.models import Role, Station, User, UserScope
 
 ROLE_ID_RE = re.compile(r"^[a-z][a-z0-9_]{2,31}$")
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_.-]{3,64}$")
@@ -36,8 +36,30 @@ def role_view(db: Session, r: Role) -> dict:
 
 
 def user_view(u: User) -> dict:
+    from sqlalchemy.orm import object_session
+    db = object_session(u)
+    sc = db.get(UserScope, u.id) if db else None
     return {"id": u.id, "username": u.username, "full_name": u.full_name, "role": u.role,
-            "role_label": role_label(u.role), "active": u.active}
+            "role_label": role_label(u.role), "active": u.active,
+            "scope": {"station_id": sc.station_id, "pto_id": sc.pto_id, "brigade_id": sc.brigade_id} if sc else None}
+
+
+def set_scope(db: Session, u: User, data: dict) -> dict | None:
+    """Явная привязка пользователя к станции / ПТО / бригаде (области видимости сообщений и заданий)."""
+    keys = ("station_id", "pto_id", "brigade_id")
+    if not any(k in data and data[k] is not None for k in keys):
+        return None
+    sc = db.get(UserScope, u.id)
+    before = {k: getattr(sc, k) for k in keys} if sc else None
+    if sc is None:
+        main = db.execute(select(Station).where(Station.kind == "main")).scalar_one_or_none()
+        sc = UserScope(user_id=u.id, station_id=data.get("station_id") or (main.id if main else "—"))
+        db.add(sc)
+    for k in keys:
+        if data.get(k) is not None:
+            setattr(sc, k, data[k].strip() or None if k != "station_id" else data[k].strip())
+    db.flush()
+    return {"before": before, "after": {k: getattr(sc, k) for k in keys}}
 
 
 def _validate_permissions(perms: list[str]) -> list[str]:
@@ -162,8 +184,9 @@ def create_user(db: Session, actor: User, data: dict) -> dict:
              role=data["role"], password_hash=hash_password(data["password"]), active=True)
     db.add(u)
     db.flush()
+    sc = set_scope(db, u, data)
     audit(db, actor, "user.create", "user", u.id, f"Создан пользователь «{username}» с ролью «{role_label(u.role)}»",
-          after={"username": username, "role": u.role})
+          after={"username": username, "role": u.role, "scope": sc["after"] if sc else None})
     return user_view(u)
 
 
@@ -187,6 +210,7 @@ def update_user(db: Session, actor: User, uid: str, data: dict) -> dict:
         u.active = bool(new_active)
     if data.get("full_name"):
         u.full_name = data["full_name"].strip()
+    sc = set_scope(db, u, data)
     after = {"full_name": u.full_name, "role": u.role, "active": u.active}
     changes = []
     if before["role"] != after["role"]:
@@ -195,6 +219,9 @@ def update_user(db: Session, actor: User, uid: str, data: dict) -> dict:
         changes.append("разблокирован" if after["active"] else "заблокирован")
     if before["full_name"] != after["full_name"]:
         changes.append("изменено имя")
+    if sc and sc["before"] != sc["after"]:
+        changes.append("изменена привязка (станция / ПТО / бригада)")
+        before["scope"], after["scope"] = sc["before"], sc["after"]
     audit(db, actor, "user.update", "user", u.id, f"Пользователь «{u.username}»: " + (", ".join(changes) or "без изменений"),
           before=before, after=after)
     return user_view(u)

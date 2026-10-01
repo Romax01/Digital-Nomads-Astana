@@ -55,6 +55,9 @@ services:
       SIM_REAL_TIME: ${SIM_REAL_TIME:-true}
       SECRET_KEY: ${SECRET_KEY:-change_me_dev_secret}
       STATION_CONFIG: ${STATION_CONFIG:-large}
+      ATTACHMENTS_DIR: /data/attachments
+    volumes:
+      - attachments:/data/attachments
     depends_on:
       db:
         condition: service_healthy
@@ -95,3 +98,4 @@ services:
 volumes:
   db_data:
   mqtt_data:
+  attachments:

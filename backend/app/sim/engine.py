@@ -278,6 +278,12 @@ class Engine:
                         return f"нет достоверных данных о состоянии: {model.track_label_lc(dest)}"
                 if o.kind == "departure" and train and train.destination_station_id in restricted:
                     return "соседняя станция не принимает (ограничение)"
+                if o.kind == "departure" and train:
+                    bad = [w for w in model.wagons_by_train.get(train.id, []) if w.condition in ("faulty", "restricted")]
+                    if bad:
+                        return (f"в составе вагон № {bad[0].number}: " +
+                                ("ограничение до проверки сообщения о дефекте" if bad[0].condition == "restricted"
+                                 else "неисправность не устранена (нужны отцепка или ремонт и контрольный осмотр)"))
             for rid in o.resource_ids or []:
                 if rid in busy_res:
                     return f"ресурс «{model.resources[rid].name}» занят"
@@ -306,7 +312,9 @@ class Engine:
                 busy_switch.difference_update(o.route_nodes or [])
                 moving_into.pop(o.track_id, None)
             if train is None:
-                if o.kind == "repair":
+                # сценарный режим: ремонт демо-инцидента завершается движком. Ручные заявки работников
+                # (work_order_id) движок не принимает — только контрольный осмотр человеком.
+                if o.kind == "repair" and not o.work_order_id:
                     m = re.search(r"№ (\d+)", o.note or "")
                     if m:
                         w = db.execute(select(Wagon).where(Wagon.number == m.group(1))).scalar_one_or_none()
@@ -322,11 +330,19 @@ class Engine:
                 standing.pop(train.current_track_id, None)
                 train.current_track_id = o.track_id
                 standing[o.track_id] = train.id
+            elif o.kind == "uncoupling" and o.work_order_id:
+                # операция по заявке: состав меняется атомарно (отцепка или замена конкретного вагона)
+                from app.services.workflow import apply_station_operation
+                if apply_station_operation(db, o, now):
+                    self.plan_flag = True
             elif o.kind == "uncoupling":
+                legacy = {i.object_id for i in model.incidents
+                          if i.kind == "faulty_wagon" and (i.params or {}).get("uncoupling_op") == o.id}
                 for w in model.wagons_by_train.get(train.id, []):
-                    if w.condition == "faulty":
+                    if w.condition == "faulty" and (not legacy or w.id in legacy):
                         w.train_id = None
                         w.condition = "in_repair"
+                        w.track_id = o.track_id
                         train.wagons_count = max(0, train.wagons_count - 1)
                         domain_event(db, "wagon.uncoupled", f"Неисправный вагон № {w.number} отцеплен и подан в депо",
                                      model_time=now)

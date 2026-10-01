@@ -219,15 +219,19 @@ def detect(model: StationModel, fc: dict | None = None) -> dict:
                                          ([_obj("train", o.train_id, f"Поезд № {model.trains[o.train_id].number}")] if o.train_id else []),
                               "operations": [o.id], "start": iso(fc.get(o.id, (aware(o.planned_start),))[0]), "end": None})
     for tid, wl in model.wagons_by_train.items():
-        bad = [w for w in wl if w.condition == "faulty"]
+        bad = [w for w in wl if w.condition in ("faulty", "restricted")]
         t = model.trains.get(tid)
         if bad and t and t.status not in ("departed", "completed"):
             has_unc = any(o.kind == "uncoupling" and o.status != "cancelled" for o in model.ops_by_train.get(tid, []))
             if not has_unc:
                 conflicts.append({"id": _cid("FW", tid), "type": "faulty_wagon", "severity": "critical",
                                   "title": f"Неисправный вагон в составе поезда № {t.number}",
-                                  "explanation": f"Вагон № {bad[0].number} неисправен. Отправление состава с неисправным вагоном "
-                                                 f"моделью не допускается; ремонтной зоны для отцепки нет — требуется решение диспетчера.",
+                                  "explanation": (f"Вагон № {bad[0].number}: временное ограничение до проверки сообщения о "
+                                                  f"предположительно критическом дефекте. Отправление состава до решения моделью не допускается."
+                                                  if bad[0].condition == "restricted" else
+                                                  f"Вагон № {bad[0].number} неисправен. Отправление состава с неисправным вагоном "
+                                                  f"моделью не допускается до устранения и контрольного осмотра (ремонт без отцепки) "
+                                                  f"или отцепки — требуется решение диспетчера."),
                                   "objects": [_obj("train", tid, f"Поезд № {t.number}"), _obj("wagon", bad[0].id, f"Вагон № {bad[0].number}")],
                                   "operations": [o.id for o in model.ops_by_train.get(tid, []) if o.kind == "departure"],
                                   "start": iso(now), "end": None})

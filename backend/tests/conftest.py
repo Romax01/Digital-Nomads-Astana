@@ -10,6 +10,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://station:station_dev_
 os.environ["DATABASE_URL"] = os.environ["DATABASE_URL"].rsplit("/", 1)[0] + "/station_test"
 os.environ["ENGINE_ENABLED"] = "false"
 os.environ["MQTT_ENABLED"] = "false"
+os.environ.setdefault("ATTACHMENTS_DIR", "/tmp/ds_attachments")
 os.environ["PLANNER_TIME_LIMIT_S"] = "3.5"
 os.environ["SEED_OPTIMIZE"] = "false"  # оптимизация начального плана проверяется отдельным тестом
 
