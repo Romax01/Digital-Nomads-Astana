@@ -41,8 +41,11 @@ class Engine:
     def step(self, advance: bool) -> bool:
         """Возвращает True, если плановое состояние изменилось."""
         mono = time.monotonic()
+        # реальное время считается от последнего ШАГА ВРЕМЕНИ, а не от последней сборки состояния:
+        # внеочередные сборки по телеметрии не должны «съедать» прошедшее время
         dt_real = min(5.0, mono - self.last_mono)
-        self.last_mono = mono
+        if advance:
+            self.last_mono = mono
         with SessionLocal() as db:
             main = db.execute(select(Station).where(Station.kind == "main")).scalar_one_or_none()
             if main is None:

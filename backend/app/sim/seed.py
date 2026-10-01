@@ -343,7 +343,69 @@ def reset_world(db: Session, config_name: str, scenario: str, seed: int):
     tb = TimetableBuilder(db, cfg, rnd, t0)
     apply_scenario(db, tb, cfg, scenario, rnd)
     db.flush()
+    from app.config import get_settings
+    if get_settings().seed_optimize and not scenario.startswith("demo_"):
+        optimize_initial_plan(db)
     return sim
+
+
+def optimize_initial_plan(db: Session) -> int:
+    """Начальное расписание строится жадно и содержит устранимые задержки. Для рабочих сценариев
+    оно один раз оптимизируется CP-SAT в детерминированном режиме (воспроизводимо по seed), чтобы
+    последующие пересчёты после инцидентов меняли только то, что действительно затронуто.
+    Фикстуры демонстрации заявки (demo_*) не оптимизируются: их состояние задано намеренно."""
+    from sqlalchemy import delete
+    from app.models import Reservation
+    from app.services.forecast import forecast
+    from app.services.planner import PlanBuilder, verify
+    from app.services.reservations import create_from_ops
+    import hashlib
+    from datetime import datetime as _dt
+    from app.models import SeedPlanCache
+    model = StationModel(db, data_states={})
+    sig = "|".join(f"{o.id}:{o.planned_start.isoformat()}:{o.track_id}:{o.status}:{','.join(o.resource_ids or [])}"
+                   for o in sorted(model.ops.values(), key=lambda x: x.id))
+    key = hashlib.sha256((sig + "|v1").encode()).hexdigest()
+    cached = db.get(SeedPlanCache, key)
+    if cached:
+        schedule = {oid: {**e, "start": _dt.fromisoformat(e["start"]), "end": _dt.fromisoformat(e["end"])}
+                    for oid, e in cached.data.items()}
+        status = "cache"
+    else:
+        pb = PlanBuilder(model, forecast(model))
+        res = pb.solve_cpsat(time_limit=60, workers=8, deterministic=1.0)
+        if res.status not in ("optimal", "feasible"):
+            log.warning("Начальный план не оптимизирован: %s", res.status)
+            return 0
+        schedule, status = res.schedule, res.status
+    if verify(model, schedule):
+        log.warning("Начальный план не прошёл проверку — оставлен исходный")
+        return 0
+    if not cached:
+        db.add(SeedPlanCache(key=key, created_at=utcnow(), data={
+            oid: {**e, "start": e["start"].isoformat(), "end": e["end"].isoformat()} for oid, e in schedule.items()}))
+    n = 0
+    for oid, e in schedule.items():
+        o = model.ops[oid]
+        if e.get("fixed"):
+            continue
+        if (e["start"], e["track_id"], e.get("from_track_id"), e["resource_ids"]) !=                 (o.planned_start, o.track_id, o.from_track_id, o.resource_ids):
+            n += 1
+        o.planned_start, o.planned_end = e["start"], e["end"]
+        o.forecast_start, o.forecast_end = e["start"], e["end"]
+        o.track_id, o.from_track_id = e["track_id"], e.get("from_track_id")
+        o.resource_ids, o.route_nodes = list(e["resource_ids"] or []), list(e["route_nodes"] or [])
+    db.execute(delete(Reservation))
+    db.flush()
+    for tid, ops in model.ops_by_train.items():
+        t = model.trains[tid]
+        create_from_ops(db, model, tid, t.number, sorted(ops, key=lambda x: x.seq))
+        dep = next((o for o in ops if o.kind == "departure"), None)
+        if dep and dep.status != "done":
+            t.expected_departure = dep.planned_start
+    db.flush()
+    log.info("Начальный план оптимизирован CP-SAT (%s), изменено операций: %d", status, n)
+    return n
 
 
 def demo_request(db: Session, cfg, *, number="Z-0001", wagons=40, dep_local_h=13.0, from_id="OTR",

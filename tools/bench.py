@@ -5,7 +5,7 @@
 
 Что измеряется:
   1. Время ответа API (p50/p95/max): состояние, расписание, проверка заявки.
-  2. Пересчёт плана после сбоя: сценарии multi_5 и multi_10 (CP-SAT, лимит 4 с).
+  2. Пересчёт плана после сбоя: сценарии multi_5 и multi_10 (CP-SAT, лимит 3,5 с).
   3. Поток повышенной интенсивности: N сообщений/с телеметрии сверх фона симулятора;
      задержки этапов (приём, сохранение, обновление модели, отправка в браузер) из /api/v1/metrics.
 Результат печатается в Markdown (для docs/performance.md).
@@ -99,7 +99,7 @@ def main():
                f"| POST /requests/{{id}}/check (проверка приёма) | {stats(timed(c, 'post', f'{API}/api/v1/requests/{rid}/check', duty, 30))} |",
                ""]
 
-    report += ["### Пересчёт плана после сбоя (CP-SAT, лимит 4 с)", "",
+    report += ["### Пересчёт плана после сбоя (CP-SAT, лимит 3,5 с)", "",
                "| Сценарий | Инцидентов | Статус решения | Расчёт CP-SAT, мс | Полное время API, мс | Изменено операций |",
                "|---|---|---|---|---|---|"]
     for sc in ("track_closure", "multi_5", "multi_10"):
@@ -134,6 +134,7 @@ def main():
     th = threading.Thread(target=ws_listener, args=(st["Authorization"][7:], stop), daemon=True)
     th.start()
     time.sleep(2)
+    c.post(f"{API}/api/v1/metrics/reset", headers=adm).raise_for_status()  # только окно нагрузки
     seq = 10 ** 7
     sent = 0
     t_end = time.time() + SECONDS

@@ -64,6 +64,7 @@ class Hub:
         self.snapshot_mono = 0.0
         self.cleanup_mono = time.monotonic()
         self.prev_data_cats: dict | None = None
+        self.reset_mono = time.monotonic()
         self.replanner = Replanner(self)
         self.running = False
 
@@ -187,9 +188,15 @@ class Hub:
         if prev is None:
             return
         changed = False
+        # первые секунды после сброса/старта датчики только начинают присылать данные — это не
+        # «потеря» и не «восстановление»: версия состояния меняется, журнал не засоряется
+        warmup = time.monotonic() - self.reset_mono < 20
         for tid, st in cats.items():
             p = prev.get(tid)
             if p == st:
+                continue
+            if warmup and (p in (None, "missing") or st == "missing"):
+                changed = True
                 continue
             bad = st not in ("actual", "not_monitored")
             was_bad = p not in (None, "actual", "not_monitored")
@@ -265,6 +272,7 @@ class Hub:
         """После сброса сценария клиенты получают полный снимок."""
         self.state = None
         self.prev_data_cats = None
+        self.reset_mono = time.monotonic()
         self.index_cache = None
         self.ring.clear()
         for c in list(self.clients):

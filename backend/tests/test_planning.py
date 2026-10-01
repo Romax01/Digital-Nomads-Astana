@@ -258,3 +258,28 @@ def test_reports_cyrillic(client, world):
     assert r.content.startswith("﻿".encode("utf-8")) and "Мини-отчёт".encode() in r.content
     r = client.get("/api/v1/reports/mini?format=pdf&minutes=60", headers=h)
     assert r.status_code == 200 and r.content.startswith(b"%PDF")
+
+
+def test_initial_plan_optimization_reproducible_and_cached(monkeypatch):
+    """Начальный план рабочих сценариев оптимизируется детерминированно: одинаковый seed — одинаковый
+    план; повторный сброс берёт результат из кэша; после этого пересчёт без инцидентов почти ничего не меняет."""
+    from app.config import get_settings
+    from app.models import SeedPlanCache
+    from app.sim.seed import reset_world
+    monkeypatch.setattr(get_settings(), "seed_optimize", True)
+    sigs, times = [], []
+    for _ in range(2):
+        with SessionLocal() as db:
+            t = time.perf_counter()
+            reset_world(db, "large", "normal", 42)
+            db.commit()
+            times.append(time.perf_counter() - t)
+            sigs.append(db.execute(text("select string_agg(id||planned_start::text||track_id, ',' order by id) from operations")).scalar())
+            assert db.execute(text(OVERLAP_SQL)).scalar() == 0
+    assert sigs[0] == sigs[1], "результат воспроизводим"
+    assert times[1] < times[0] / 3, f"повторный сброс из кэша: {times}"
+    with SessionLocal() as db:
+        assert db.execute(select(SeedPlanCache)).first() is not None
+        fresh_observations(db)
+        res = run_planner(StationModel(db), time_limit=3.5)
+        assert len(res["changes"]) <= 5, f"после оптимизации базы изменений мало: {len(res['changes'])}"

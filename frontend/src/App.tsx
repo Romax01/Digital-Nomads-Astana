@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
 import Header from "./components/Header";
+import { ForecastBar, ReplayBar } from "./components/Panels";
 import { Loading, Toasts } from "./components/ui";
 import { api, getToken, setToken } from "./lib/api";
 import { setTimezone } from "./lib/format";
@@ -45,6 +46,7 @@ function Nav() {
 function Shell() {
   const conn = useStore((s) => s.conn);
   const live = useStore((s) => s.live);
+  const mode = useStore((s) => s.mode);
   const setTopology = useStore((s) => s.setTopology);
   const stationKey = live ? `${live.meta.station_id}-${live.meta.scenario}-${live.meta.seed}` : "";
   useEffect(() => { connect(); return () => disconnect(); }, []);
@@ -66,6 +68,9 @@ function Shell() {
       )}
       <Nav />
       <main id="main" className="app-main" tabIndex={-1}>
+        {/* панели режимов — на уровне приложения: «История» и «Прогноз» работают на всех разделах */}
+        {live && mode === "history" && <div style={{ padding: "10px 10px 0" }}><ReplayBar /></div>}
+        {live && mode === "forecast" && <div style={{ padding: "10px 10px 0" }}><ForecastBar st={live} /></div>}
         {!live ? <Loading text="Подключение к станции…" /> : (
           <Routes>
             <Route path="/" element={<Overview />} />

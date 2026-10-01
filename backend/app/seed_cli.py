@@ -31,4 +31,11 @@ def main():
 
 
 if __name__ == "__main__":
+    import os
+    import sys
     main()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # Гарантированное завершение: после решения CP-SAT нативные потоки OR-Tools могли задерживать
+    # выход интерпретатора на минуты, откладывая запуск backend (данные уже зафиксированы).
+    os._exit(0)

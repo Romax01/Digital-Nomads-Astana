@@ -122,7 +122,7 @@ def apply_plan(db: Session, user: User, plan_id: int) -> dict:
                           "resource_ids": a.get("resource_ids") or [], "route_nodes": a.get("route_nodes") or [],
                           "fixed": a.get("fixed", False), "kept": a.get("kept", False)}
     from app.services.planner import verify
-    errs = verify(model, {k: v for k, v in schedule.items() if not v.get("kept") and k in model.ops})
+    errs = verify(model, {k: v for k, v in schedule.items() if k in model.ops})
     if errs:
         raise Conflict("PLAN_INVALID", "Повторная проверка плана выявила нарушения: " + "; ".join(errs[:3]),
                        details={"errors": errs}, hint="Пересчитайте план.")

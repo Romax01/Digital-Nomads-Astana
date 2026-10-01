@@ -718,6 +718,12 @@ def get_metrics(_: User = Depends(require("state.view"))):
     return m
 
 
+@router.post("/metrics/reset", tags=["Служебные"], summary="Сбросить накопленные метрики (начало замера)")
+def reset_metrics(_: User = Depends(require("sim.control"))):
+    metrics.reset()
+    return {"ok": True}
+
+
 @router.post("/metrics/client", tags=["Служебные"], summary="Метрики отображения от клиента")
 def client_metrics(body: S.ClientMetricsIn, _: User = Depends(current_user)):
     for s in body.samples[:200]:

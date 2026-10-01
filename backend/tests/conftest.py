@@ -10,7 +10,8 @@ os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://station:station_dev_
 os.environ["DATABASE_URL"] = os.environ["DATABASE_URL"].rsplit("/", 1)[0] + "/station_test"
 os.environ["ENGINE_ENABLED"] = "false"
 os.environ["MQTT_ENABLED"] = "false"
-os.environ["PLANNER_TIME_LIMIT_S"] = "4"
+os.environ["PLANNER_TIME_LIMIT_S"] = "3.5"
+os.environ["SEED_OPTIMIZE"] = "false"  # оптимизация начального плана проверяется отдельным тестом
 
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402

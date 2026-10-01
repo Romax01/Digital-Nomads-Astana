@@ -40,7 +40,7 @@ flowchart LR
   API -- plan_state_changed после commit --> BUS
   BUS --> HUB[Hub: сборка состояния]
   BUS --> RP[Перепланирование\ndebounce 1 с]
-  RP -- CP-SAT 4 с + валидатор --> DB
+  RP -- CP-SAT 3,5 с + валидатор --> DB
   HUB -- snapshot / delta по версии --> WS[WebSocket]
   WS --> UI[Браузер: 2D, 3D, Гант, панели]
   HUB -- дельты и снимки --> DB

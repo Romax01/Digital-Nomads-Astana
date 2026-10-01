@@ -49,6 +49,7 @@ ASSUMPTIONS = [
     "Время перехода ресурса между зонами учитывается как подготовка перед операцией.",
     "Поезд не может прибыть раньше прогнозного времени и отправиться раньше расписания.",
     "Горизонт планирования — 24 ч; приоритеты поездов — веса 2^(приоритет−1).",
+    "Смена назначенной бригады или локомотива штрафуется (как 4 мин задержки поезда низшего приоритета).",
 ]
 
 
@@ -182,7 +183,7 @@ class PlanBuilder:
         return out
 
     # ------------------------------------------------------------------ CP-SAT
-    def solve_cpsat(self, time_limit: float, workers: int) -> PlanResult:
+    def solve_cpsat(self, time_limit: float, workers: int, deterministic: float | None = None) -> PlanResult:
         m = self.m
         mdl = cp_model.CpModel()
         S, E, IV = {}, {}, {}
@@ -339,7 +340,12 @@ class PlanBuilder:
                     for rid in o.resource_ids or []:
                         res_iv.setdefault(rid, []).append(mdl.NewIntervalVar(S[o.id], ci.dur, E[o.id], f"fr_{o.id}_{rid}"))
                     continue
-                zone = m.op_zone(o.kind, o.track_id)
+                # путь операции может смениться — время перехода берём максимальным по допустимым путям
+                stay = self.stays[ci.stay] if ci.stay is not None else None
+                if o.kind == "uncoupling" or stay is None:  # отцепка: зона — депо (путь назначения вагона)
+                    zones = {m.op_zone(o.kind, o.track_id)}
+                else:
+                    zones = {m.op_zone(o.kind, t) for t in stay["cands"]} or {m.op_zone(o.kind, o.track_id)}
                 for k, rk in enumerate(o.requirements or []):
                     cands = [r for r, row in m.resources.items() if row.kind == rk]
                     if not cands:
@@ -349,7 +355,7 @@ class PlanBuilder:
                     for rid in cands:
                         y = mdl.NewBoolVar(f"y_{o.id}_{k}_{rid}")
                         ys.append((y, rid))
-                        pad = m.zone_travel(m.resources[rid].home_zone_id, zone)
+                        pad = max(m.zone_travel(m.resources[rid].home_zone_id, z) for z in zones)
                         st_pad = mdl.NewIntVar(-H_MAX, H_MAX + 1, f"sp_{o.id}_{k}_{rid}")
                         mdl.Add(st_pad == S[o.id] - pad)
                         iv = mdl.NewOptionalIntervalVar(st_pad, ci.dur + pad, E[o.id], y, f"ri_{o.id}_{k}_{rid}")
@@ -417,6 +423,15 @@ class PlanBuilder:
             for t in st["cands"]:
                 if t != st["track0"]:
                     terms.append((30 if st["confirmed"] else 8) * 10 * X[(st["idx"], t)])
+        # смена назначенного ресурса без пользы — тоже изменение плана для людей: небольшой штраф
+        for (oid, k), ys in self.res_choice.items():
+            o = self.m.ops[oid]
+            cur = (o.resource_ids or [None] * (k + 1))[k] if o.resource_ids and len(o.resource_ids) > k else None
+            if cur is None or not o.reserved:
+                continue
+            for y, rid in ys:
+                if rid != cur:
+                    terms.append(40 * y)
         for chain in self.chains:
             for ci in chain:
                 if ci.fixed or not ci.op.reserved:
@@ -438,6 +453,9 @@ class PlanBuilder:
         solver.parameters.max_time_in_seconds = time_limit
         solver.parameters.num_workers = workers
         solver.parameters.random_seed = 7
+        if deterministic:  # воспроизводимый результат: чередующийся поиск и детерминированный лимит работы
+            solver.parameters.interleave_search = True
+            solver.parameters.max_deterministic_time = deterministic
         t0 = time.perf_counter()
         st_code = solver.Solve(mdl)
         ms = (time.perf_counter() - t0) * 1000
@@ -487,6 +505,20 @@ class PlanBuilder:
         затем остальные по убыванию приоритета."""
         m = self.m
         t0 = time.perf_counter()
+        kept_chains: set[int] = set()
+        for _attempt in range(3):
+            res, failed = self._greedy_pass(kept_chains)
+            if not failed - kept_chains:
+                break
+            kept_chains |= failed  # неразмещённые поезда бронируем заранее и проходим заново
+        res.solve_ms = round((time.perf_counter() - t0) * 1000, 1)
+        if res.unresolved:
+            res.status = "partial"
+        return res
+
+    def _greedy_pass(self, kept_chains: set[int]):
+        m = self.m
+        failed: set[int] = set()
         book = IntervalBook()
         m.add_blocks(book, include_data_blocks=True)
         res = PlanResult(status="heuristic", solver="Эвристика earliest-fit", solve_ms=0, unresolved=list(self.unresolved))
@@ -510,7 +542,33 @@ class PlanBuilder:
             pr = m.trains[ch[0].op.train_id].priority if ch[0].op.train_id else 0
             return (0 if st["fixed"] else 1, -pr, ch[0].lb)
 
-        for chain in sorted(self.chains, key=key):
+        def keep(chain, rest):
+            """Оставить операции поезда как в текущем плане и занять ими книгу интервалов."""
+            for ci in rest:
+                o = ci.op
+                res.schedule[o.id] = {"start": aware(o.planned_start), "end": aware(o.planned_end),
+                                      "track_id": o.track_id, "from_track_id": o.from_track_id,
+                                      "resource_ids": list(o.resource_ids or []),
+                                      "route_nodes": list(o.route_nodes or []), "fixed": False, "kept": True}
+            dicts = [{"id": ci.op.id, "kind": ci.op.kind, "track_id": ci.op.track_id, "from_track_id": ci.op.from_track_id,
+                      "start": aware(ci.op.planned_start), "end": aware(ci.op.planned_end), "side": ci.op.side,
+                      "resource_ids": ci.op.resource_ids or [], "route_nodes": ci.op.route_nodes or [],
+                      "status": "planned"} for ci in rest]
+            tr = m.trains.get(rest[0].op.train_id) if rest[0].op.train_id else None
+            for sp in reservation_specs(m, tr.id if tr else None, tr.number if tr else "", with_presence(m, tr, dicts)):
+                book.add(sp["key"], sp["start"], sp["end"], type="reservation", train_id=sp["train_id"])
+
+        ordered = sorted(enumerate(self.chains), key=lambda p: key(p[1]))
+        for idx, chain in ordered:  # сначала заранее оставленные поезда — они занимают книгу первыми
+            if idx in kept_chains:
+                rest = [ci for ci in chain if not ci.fixed]
+                if rest:
+                    keep(chain, rest)
+                    res.unresolved.append({"train": m.trains[rest[0].op.train_id].number if rest[0].op.train_id else None,
+                                           "reason": "эвристика не нашла размещения; операции оставлены как в текущем плане"})
+        for idx, chain in ordered:
+            if idx in kept_chains:
+                continue
             rest = [ci for ci in chain if not ci.fixed]
             if not rest:
                 continue
@@ -553,20 +611,21 @@ class PlanBuilder:
                              side_out=train.departure_side if train else "east",
                              template=steps, arrival=_dt(m, start_after),
                              departure_not_before=aware(train.scheduled_departure) if train and train.scheduled_departure else None)
-            placer = Placer(m, book, wait_max_min=600)
+            placer = Placer(m, book, wait_max_min=600, ignore_train=spec.train_id)  # свои резервы не мешают
             if standing:
                 placer.force_first = src
             elif rest[0].op.kind not in ("arrival", "shunting"):
                 placer.force_first = first_stay["track0"]
             pr = placer.place(spec, arrival_exact=False)
             if not pr.ok:
-                res.unresolved.append({"train": spec.number, "reason": "эвристика не нашла размещения в горизонте"})
-                for ci in rest:
+                failed.add(idx)
+                for ci in rest:  # до следующего прохода — как в текущем плане
                     o = ci.op
                     res.schedule[o.id] = {"start": aware(o.planned_start), "end": aware(o.planned_end),
                                           "track_id": o.track_id, "from_track_id": o.from_track_id,
                                           "resource_ids": list(o.resource_ids or []),
                                           "route_nodes": list(o.route_nodes or []), "fixed": False, "kept": True}
+                res.unresolved.append({"train": spec.number, "reason": "эвристика не нашла размещения в горизонте"})
                 continue
             commit_to_book(m, book, spec.train_id, spec.number, pr.ops)
             placed = pr.ops[1:] if standing else pr.ops
@@ -574,10 +633,7 @@ class PlanBuilder:
                 res.schedule[ci.op.id] = {"start": po.start, "end": po.end, "track_id": po.track_id,
                                           "from_track_id": po.from_track_id or ci.op.from_track_id,
                                           "resource_ids": po.resource_ids, "route_nodes": po.route_nodes, "fixed": False}
-        res.solve_ms = round((time.perf_counter() - t0) * 1000, 1)
-        if res.unresolved:
-            res.status = "partial"
-        return res
+        return res, failed
 
 
 # ---------------------------------------------------------------------- проверка и сводка
@@ -600,7 +656,7 @@ def verify(model: StationModel, schedule: dict, unresolved_tracks: set | None = 
                   "start": e["start"], "end": e["end"], "resource_ids": e["resource_ids"], "route_nodes": e["route_nodes"],
                   "side": o.side, "status": "in_progress" if e.get("fixed") else "planned"} for o, e in items]
         dicts = with_presence(model, train, dicts)
-        fixed_ops = {o.id for o, e in items if e.get("fixed")} | {d["id"] for d in dicts if d["id"].startswith("presence-")}
+        fixed_ops = {o.id for o, e in items if e.get("fixed") or e.get("kept")} |             {d["id"] for d in dicts if d["id"].startswith("presence-")}
         prev_end = None
         for o, e in items:
             if prev_end and e["start"] < prev_end and not e.get("fixed"):
@@ -650,7 +706,7 @@ def run_planner(model: StationModel, *, time_limit: float | None = None, trigger
     if res is None:
         pb2 = PlanBuilder(model, fc_before)
         res = pb2.solve_greedy()
-        errs = verify(model, {k: v for k, v in res.schedule.items() if not v.get("kept")}, unresolved_tracks)
+        errs = verify(model, res.schedule, unresolved_tracks)  # весь план, включая оставленные операции
         if errs:
             notes.append("Эвристика: часть плана не прошла проверку — " + "; ".join(errs[:3]))
             res.status = "partial"

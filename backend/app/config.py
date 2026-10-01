@@ -25,8 +25,9 @@ class Settings(BaseSettings):
     sim_autostart: bool = True
     sim_seed: int = 42
     sim_tick_seconds: float = 1.0
+    seed_optimize: bool = True  # оптимизировать начальный план рабочих сценариев (детерминированно)
 
-    planner_time_limit_s: float = 4.0
+    planner_time_limit_s: float = 3.5
     planner_workers: int = 8
     replan_debounce_s: float = 1.0
 

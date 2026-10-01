@@ -226,8 +226,11 @@ class Placer:
                 stays[-1][1].append(st)
         best: list[PlacedOp] | None = None
 
-        def finish_stay(track: str, stay_start: datetime, stay_end: datetime) -> list[Entry]:
-            return self._blocking(f"track:{track}", stay_start, stay_end + self.buf)
+        def finish_stay(track: str, stay_start: datetime, stay_end: datetime, standing: bool = False) -> list[Entry]:
+            b = self._blocking(f"track:{track}", stay_start, stay_end + self.buf)
+            if standing:  # поезд уже стоит на пути: закрытие запрещает новые заезды, но не его стоянку
+                b = [e for e in b if e.meta.get("type") not in ("closure", "maintenance", "data")]
+            return b
 
         def dfs(i: int, prev_track: str | None, t_ready: datetime, acc: list[PlacedOp], seq: int,
                 prev_stay_start: datetime | None, top_track: str | None) -> bool:
@@ -244,7 +247,7 @@ class Placer:
                     continue
                 # предыдущая стоянка занята до окончания вытягивания
                 if prev_track is not None:
-                    b = finish_stay(prev_track, prev_stay_start, op.end)
+                    b = finish_stay(prev_track, prev_stay_start, op.end, standing=(i == 1 and self.force_first is not None))
                     if b:
                         self._note(res, tt, prev_track, "OCCUPIED", b, first)
                         continue
@@ -277,7 +280,7 @@ class Placer:
                     if dfs(i + 1, track, t, acc + ops, seq + len(steps), stay_start, tt):
                         return True
                     continue
-                b = finish_stay(track, stay_start, t)
+                b = finish_stay(track, stay_start, t, standing=(i == 0 and self.force_first is not None))
                 if b:
                     self._note(res, tt, track, "OCCUPIED", b, steps[-1])
                     continue

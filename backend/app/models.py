@@ -529,3 +529,12 @@ class SimState(Base):
     world: Mapped[dict] = mapped_column(J, default=dict)  # неисправности устройств и пр. для симулятора
     scheduled_events: Mapped[list] = mapped_column(J, default=list)
     seq_counter: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
+class SeedPlanCache(Base):
+    """Оптимизированный начальный план (детерминированный результат CP-SAT) по отпечатку расписания."""
+
+    __tablename__ = "seed_plan_cache"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    data: Mapped[dict] = mapped_column(J)
+    created_at: Mapped[datetime] = mapped_column(TS)

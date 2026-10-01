@@ -23,7 +23,9 @@
 | Единый формат ошибок на русском | `core/errors.py` | `{error:{code,message,details,hint}}` | `test_error_format_and_auth`, `test_validation_error_in_russian` |
 | Устаревшая рекомендация | `routes.py::apply_recommendation` | 409 RECOMMENDATION_STALE после изменения состояния | `test_stale_recommendation_cannot_be_applied` |
 | ИИ-планирование: закрытие пути → конфликт → план | `conflicts.py`, `planner.py`, `plans.py` | конфликт обнаружен, план допустим (валидатор), применён без двойных резервов | `test_track_closure_conflict_and_replan` |
-| Пересчёт ≤ 5 с; 5 и 10 инцидентов | `planner.py` (лимит 4 с) | статус честный, план проверен, нет двойного резервирования | `test_replan_5_incidents`, `test_replan_10_incidents`, `tools/bench.py` |
+| Сквозной сценарий показа | весь стек | все шаги docs/demo.md выполняются на запущенном стенде | `tools/demo_e2e.py` (0 ошибок) |
+| Качество плана: изменения только затронутых операций | `seed.py::optimize_initial_plan`, штраф смены ресурса | после оптимизации базы пересчёт меняет ≤ 5 операций без инцидента | `test_initial_plan_optimization_reproducible_and_cached` |
+| Пересчёт ≤ 5 с; 5 и 10 инцидентов | `planner.py` (лимит 3,5 с) | статус честный, план проверен, нет двойного резервирования | `test_replan_5_incidents`, `test_replan_10_incidents`, `tools/bench.py` |
 | Движение не проходит через запрещённое | `sim/engine.py` | заезд на закрытый путь не начинается, поезд ждёт с причиной | `test_engine_does_not_enter_closed_track` |
 | Исполнение плана моделью | `sim/engine.py` | операции выполняются, пересечений резервов нет | `test_engine_progresses_trains` |
 | Ручной перенос с проверкой | `plans.py::reschedule_operation` | нарушающий перенос — 409 со списком ошибок | `test_manual_reschedule_validated` |

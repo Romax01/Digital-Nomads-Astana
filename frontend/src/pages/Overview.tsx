@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Gantt from "../components/Gantt";
 import ObjectCard from "../components/ObjectCard";
-import { AlertsList, ConflictsList, ForecastBar, IndexWidget, RecommendationsList, ReplayBar } from "../components/Panels";
+import { AlertsList, ConflictsList, IndexWidget, RecommendationsList } from "../components/Panels";
 import Schematic2D from "../components/Schematic2D";
 import { hasWebGL } from "../lib/webgl";
 import { Empty, Loading } from "../components/ui";
@@ -45,8 +45,6 @@ export default function Overview() {
           <small>версия состояния {st.meta.state_version}</small></div>
       </div>
       <section className="ov-center" aria-label="Схема станции">
-        {mode === "history" && <ReplayBar />}
-        {mode === "forecast" && <ForecastBar st={st} />}
         <div className="row between" style={{ margin: "4px 0" }}>
           <div className="seg" role="group" aria-label="Представление">
             <button aria-pressed={view === "2d"} onClick={() => setView("2d")}>2D-схема</button>
