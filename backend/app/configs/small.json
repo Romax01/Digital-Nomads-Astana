@@ -1,0 +1,83 @@
+{
+  "config_id": "small",
+  "station": {
+    "id": "SHM",
+    "name": "Шамалган (демо)",
+    "timezone": "Asia/Almaty",
+    "note": "Небольшая демонстрационная станция без депо и сортировочного парка. Данные синтетические."
+  },
+  "layout": {"x_west": 220, "x_east": 1380, "dx": 34, "lane_gap": 40, "x_west_end": 880, "x_east_start": 900, "x_entry_west": 20, "x_entry_east": 1580},
+  "main_track": {"number": "I", "length_m": 1100, "platforms": [{"id": "P1", "name": "Пассажирская платформа", "length_m": 250}]},
+  "parks": [
+    {"id": "A", "name": "Приёмо-отправочный парк", "kind": "receiving_departure", "sides": ["west", "east"],
+     "tracks": [
+       {"number": "1", "length_m": 760, "kinds": ["freight", "transfer"]},
+       {"number": "2", "length_m": 700, "kinds": ["freight", "transfer"]},
+       {"number": "3", "length_m": 620, "kinds": ["freight", "transfer"]}
+     ]},
+    {"id": "C", "name": "Грузовой фронт", "kind": "cargo", "sides": ["east"],
+     "tracks": [{"number": "4", "length_m": 300, "kinds": ["freight"], "zone": "CF1"}]}
+  ],
+  "zones": [
+    {"id": "CF1", "name": "Повышенный путь выгрузки", "kind": "cargo_front", "operations": ["unloading"]},
+    {"id": "PTO", "name": "Пост осмотра вагонов", "kind": "inspection", "operations": ["inspection"]},
+    {"id": "LOCO", "name": "Стоянка маневрового локомотива", "kind": "loco_depot", "operations": []}
+  ],
+  "zone_travel_min": {"default": 4},
+  "resources": [
+    {"id": "ML-1", "kind": "shunting_loco", "name": "Маневровый локомотив ЧМЭ3-5521", "zone": "LOCO"},
+    {"id": "LB-1", "kind": "loco_crew", "name": "Локомотивная бригада", "zone": "LOCO", "shift": "all"},
+    {"id": "SB-1", "kind": "shunting_crew", "name": "Составительская бригада", "zone": "LOCO", "shift": "all"},
+    {"id": "IT-1", "kind": "inspection_team", "name": "Осмотрщики вагонов", "zone": "PTO", "shift": "all"},
+    {"id": "PG-1", "kind": "cargo_equipment", "name": "Вагоноопрокидыватель-эстакада", "zone": "CF1"}
+  ],
+  "shifts": {"all": [0, 24]},
+  "processing": {
+    "track_buffer_min": 5,
+    "templates": {
+      "transfer_in": [
+        {"kind": "arrival", "group": "receiving_departure", "duration": 10},
+        {"kind": "inspection", "duration": 45, "requires": ["inspection_team"]},
+        {"kind": "departure", "duration": 8}
+      ],
+      "transit": [
+        {"kind": "arrival", "group": "receiving_departure", "duration": 10},
+        {"kind": "inspection", "duration": 30, "requires": ["inspection_team"]},
+        {"kind": "departure", "duration": 8}
+      ],
+      "cargo": [
+        {"kind": "arrival", "group": "receiving_departure", "duration": 10},
+        {"kind": "shunting", "group": "cargo", "duration": 12, "requires": ["shunting_loco", "loco_crew", "shunting_crew"]},
+        {"kind": "unloading", "duration": 90, "requires": ["cargo_equipment"]},
+        {"kind": "shunting", "group": "receiving_departure", "duration": 12, "requires": ["shunting_loco", "loco_crew", "shunting_crew"]},
+        {"kind": "departure", "duration": 8}
+      ],
+      "passenger": [
+        {"kind": "arrival", "group": "main", "duration": 4},
+        {"kind": "dwell", "duration": 5},
+        {"kind": "departure", "duration": 4}
+      ]
+    },
+    "transfer_template": "transfer_in",
+    "length_margin_m": 10,
+    "wagon_lengths_m": {"gondola": 13.92, "covered": 17.64, "tank": 12.02, "flat": 14.62, "hopper": 14.72},
+    "default_loco_length_m": 34.0
+  },
+  "capacity_rules": [
+    {"code": "MONTHLY_PLAN", "name": "Месячный план обработки вагонов", "category": "monthly_plan", "unit": "вагонов", "period": "календарный месяц", "source": "План станции (демо)", "rule": "Факт + согласованные + новая заявка ≤ цель; превышение — предупреждение или отказ при жёсткой квоте.", "policy": "soft"},
+    {"code": "DAILY_PROCESSING", "name": "Перерабатывающая способность станции", "category": "processing_capacity", "unit": "вагонов в сутки", "period": "сутки (местное время)", "source": "ТРА (демо)", "rule": "Сумма вагонов в обработке за сутки ≤ значения.", "value": 420, "policy": "hard"},
+    {"code": "ENTRY_THROUGHPUT_WEST", "name": "Пропускная способность входа с запада", "category": "throughput", "unit": "поездов в час", "period": "скользящий час", "source": "Расчёт (демо)", "rule": "Прибытий с запада в часовом окне ≤ значения.", "value": 2, "policy": "hard"},
+    {"code": "PARK_A_SIMULTANEOUS", "name": "Одновременная вместимость приёмо-отправочного парка", "category": "simultaneous_capacity", "unit": "составов одновременно", "period": "интервал приёма и обработки", "source": "Топология станции", "rule": "Свободный путь достаточной длины на весь интервал.", "policy": "hard"},
+    {"code": "RESOURCES", "name": "Доступность бригад и локомотивов", "category": "resource", "unit": "единиц ресурса", "period": "интервал операции", "source": "Наряд смены (демо)", "rule": "Ресурс нужного вида свободен и в смене.", "policy": "hard"},
+    {"code": "TIME_WINDOW", "name": "Возможность приёма в конкретное время", "category": "time_window", "unit": "интервал времени", "period": "прибытие и обработка", "source": "Резервы, инциденты, датчики", "rule": "Нет пересечений, закрытий и неизвестных состояний.", "policy": "hard"}
+  ],
+  "plan": {"month_target_wagons": 4200, "actual_base_wagons": 3100, "policy": "soft"},
+  "neighbors": [
+    {"id": "OTR", "name": "Отар (демо)", "side": "west", "travel_min": 70, "max_train_length_m": 900, "receiving_tracks": 2,
+     "processing_min": 60, "locomotives_available": 2, "accepts": ["freight", "transfer"], "travel_min_to": {"ZHT": 160}},
+    {"id": "ZHT", "name": "Жетыген (демо)", "side": "east", "travel_min": 80, "max_train_length_m": 850, "receiving_tracks": 3,
+     "processing_min": 90, "locomotives_available": 2, "accepts": ["freight", "transfer"], "travel_min_to": {"OTR": 160}}
+  ],
+  "maintenance": [],
+  "timetable": {"transit": 4, "transfer_in": 2, "cargo": 1, "passenger": 2, "span_h": 10}
+}

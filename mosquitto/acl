@@ -1,0 +1,7 @@
+# Сервис приёма телеметрии: только чтение.
+user ingest
+topic read station/#
+
+# Симулятор (или шлюз реальных устройств): только публикация.
+user simulator
+topic write station/#

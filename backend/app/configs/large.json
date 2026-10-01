@@ -1,0 +1,120 @@
+{
+  "config_id": "large",
+  "station": {
+    "id": "ALM",
+    "name": "Алматы (демо)",
+    "timezone": "Asia/Almaty",
+    "note": "Схема, ограничения и показатели станции демонстрационные и не соответствуют реальной станции Алматы."
+  },
+  "layout": {"x_west": 170, "x_east": 1430, "dx": 32, "lane_gap": 34, "x_west_end": 880, "x_east_start": 960, "x_entry_west": 20, "x_entry_east": 1580},
+  "main_track": {"number": "I", "length_m": 1250, "platforms": [{"id": "P1", "name": "Пассажирская платформа № 1", "length_m": 400}]},
+  "parks": [
+    {"id": "A", "name": "Приёмо-отправочный парк А", "kind": "receiving_departure", "sides": ["west", "east"],
+     "tracks": [
+       {"number": "1", "length_m": 850, "kinds": ["freight", "transfer"]},
+       {"number": "2", "length_m": 850, "kinds": ["freight", "transfer"]},
+       {"number": "3", "length_m": 720, "kinds": ["freight", "transfer"]},
+       {"number": "4", "length_m": 1050, "kinds": ["freight", "transfer"]},
+       {"number": "5", "length_m": 1050, "kinds": ["freight", "transfer"]},
+       {"number": "6", "length_m": 560, "kinds": ["freight", "transfer"]}
+     ]},
+    {"id": "B", "name": "Сортировочный парк Б", "kind": "sorting", "sides": ["west"],
+     "tracks": [
+       {"number": "7", "length_m": 700, "kinds": ["freight", "transfer"]},
+       {"number": "8", "length_m": 700, "kinds": ["freight", "transfer"]},
+       {"number": "9", "length_m": 650, "kinds": ["freight", "transfer"]},
+       {"number": "10", "length_m": 650, "kinds": ["freight", "transfer"]}
+     ]},
+    {"id": "C", "name": "Грузовой район", "kind": "cargo", "sides": ["east"],
+     "tracks": [
+       {"number": "13", "length_m": 420, "kinds": ["freight"], "zone": "CF1"},
+       {"number": "14", "length_m": 380, "kinds": ["freight"], "zone": "CF2"}
+     ]},
+    {"id": "D", "name": "Ремонтное депо и ПТО", "kind": "repair", "sides": ["east"],
+     "tracks": [
+       {"number": "15", "length_m": 300, "kinds": ["freight"], "zone": "DEPOT"}
+     ]}
+  ],
+  "zones": [
+    {"id": "CF1", "name": "Контейнерная площадка (фронт № 1)", "kind": "cargo_front", "operations": ["loading", "unloading"]},
+    {"id": "CF2", "name": "Крытый склад (фронт № 2)", "kind": "cargo_front", "operations": ["unloading"]},
+    {"id": "DEPOT", "name": "Вагонное депо", "kind": "repair", "operations": ["repair"]},
+    {"id": "PTO", "name": "Пункт технического обслуживания (ПТО)", "kind": "inspection", "operations": ["inspection"]},
+    {"id": "LOCO", "name": "Стоянка маневровых локомотивов", "kind": "loco_depot", "operations": []}
+  ],
+  "zone_travel_min": {"default": 5, "PTO-CF1": 10, "PTO-CF2": 10, "PTO-DEPOT": 8, "LOCO-CF1": 8, "LOCO-DEPOT": 6},
+  "resources": [
+    {"id": "ML-1", "kind": "shunting_loco", "name": "Маневровый локомотив ТЭМ2-1047", "zone": "LOCO"},
+    {"id": "ML-2", "kind": "shunting_loco", "name": "Маневровый локомотив ТЭМ2-2210", "zone": "LOCO"},
+    {"id": "LB-1", "kind": "loco_crew", "name": "Локомотивная бригада № 1", "zone": "LOCO", "shift": "day"},
+    {"id": "LB-2", "kind": "loco_crew", "name": "Локомотивная бригада № 2", "zone": "LOCO", "shift": "day"},
+    {"id": "LB-3", "kind": "loco_crew", "name": "Локомотивная бригада № 3", "zone": "LOCO", "shift": "night"},
+    {"id": "SB-1", "kind": "shunting_crew", "name": "Составительская бригада № 1", "zone": "LOCO", "shift": "day"},
+    {"id": "SB-2", "kind": "shunting_crew", "name": "Составительская бригада № 2", "zone": "LOCO", "shift": "night_day"},
+    {"id": "IT-1", "kind": "inspection_team", "name": "Бригада осмотрщиков ПТО № 1", "zone": "PTO", "shift": "day"},
+    {"id": "IT-2", "kind": "inspection_team", "name": "Бригада осмотрщиков ПТО № 2", "zone": "PTO", "shift": "day"},
+    {"id": "IT-3", "kind": "inspection_team", "name": "Бригада осмотрщиков ПТО № 3", "zone": "PTO", "shift": "day"},
+    {"id": "IT-4", "kind": "inspection_team", "name": "Бригада осмотрщиков ПТО № 4", "zone": "PTO", "shift": "night"},
+    {"id": "KK-1", "kind": "cargo_equipment", "name": "Козловой кран КК-1", "zone": "CF1"},
+    {"id": "PG-1", "kind": "cargo_equipment", "name": "Погрузчик ПГ-1", "zone": "CF2"},
+    {"id": "RB-1", "kind": "repair_team", "name": "Ремонтная бригада депо", "zone": "DEPOT", "shift": "day"}
+  ],
+  "shifts": {"day": [8, 20], "night": [20, 32], "night_day": [0, 24]},
+  "processing": {
+    "track_buffer_min": 5,
+    "templates": {
+      "transfer_in": [
+        {"kind": "arrival", "group": "receiving_departure", "duration": 10},
+        {"kind": "inspection", "duration": 60, "requires": ["inspection_team"]},
+        {"kind": "shunting", "group": "sorting", "duration": 15, "requires": ["shunting_loco", "loco_crew", "shunting_crew"]},
+        {"kind": "sorting", "duration": 45, "requires": []}
+      ],
+      "transit": [
+        {"kind": "arrival", "group": "receiving_departure", "duration": 10},
+        {"kind": "inspection", "duration": 40, "requires": ["inspection_team"]},
+        {"kind": "departure", "duration": 8}
+      ],
+      "cargo": [
+        {"kind": "arrival", "group": "receiving_departure", "duration": 10},
+        {"kind": "inspection", "duration": 30, "requires": ["inspection_team"]},
+        {"kind": "shunting", "group": "cargo", "duration": 15, "requires": ["shunting_loco", "loco_crew", "shunting_crew"]},
+        {"kind": "unloading", "duration": 120, "requires": ["cargo_equipment"]},
+        {"kind": "shunting", "group": "receiving_departure", "duration": 15, "requires": ["shunting_loco", "loco_crew", "shunting_crew"]},
+        {"kind": "departure", "duration": 8}
+      ],
+      "passenger": [
+        {"kind": "arrival", "group": "main", "duration": 4},
+        {"kind": "dwell", "duration": 10},
+        {"kind": "departure", "duration": 4}
+      ]
+    },
+    "transfer_template": "transfer_in",
+    "length_margin_m": 10,
+    "wagon_lengths_m": {"gondola": 13.92, "covered": 17.64, "tank": 12.02, "flat": 14.62, "hopper": 14.72},
+    "default_loco_length_m": 34.0
+  },
+  "capacity_rules": [
+    {"code": "MONTHLY_PLAN", "name": "Месячный план обработки вагонов", "category": "monthly_plan", "unit": "вагонов", "period": "календарный месяц", "source": "План станции (демо, таблица plans)", "rule": "Факт + согласованные заявки + новая заявка ≤ цель. По умолчанию превышение — предупреждение; в режиме «жёсткая квота» — отказ.", "policy": "soft"},
+    {"code": "DAILY_PROCESSING", "name": "Перерабатывающая способность станции", "category": "processing_capacity", "unit": "вагонов в сутки", "period": "сутки (местное время)", "source": "Технико-распорядительный акт (демо)", "rule": "Сумма вагонов, прибывающих в переработку за сутки, включая новую заявку, ≤ значения.", "value": 1400, "policy": "hard"},
+    {"code": "ENTRY_THROUGHPUT_WEST", "name": "Пропускная способность входа со стороны Отар", "category": "throughput", "unit": "поездов в час", "period": "скользящий час", "source": "Расчёт пропускной способности (демо)", "rule": "Число прибытий с западной стороны в часовом окне вокруг прибытия ≤ значения.", "value": 4, "policy": "hard"},
+    {"code": "PARK_A_SIMULTANEOUS", "name": "Одновременная вместимость парка А", "category": "simultaneous_capacity", "unit": "составов одновременно", "period": "интервал приёма и обработки", "source": "Топология станции (пути парка А)", "rule": "Нужен хотя бы один путь парка А, свободный на весь интервал приёма и обработки, с полезной длиной не меньше длины состава плюс запас.", "policy": "hard"},
+    {"code": "RESOURCES", "name": "Доступность бригад и локомотивов", "category": "resource", "unit": "единиц ресурса", "period": "интервал операции (смена бригады)", "source": "Наряд смены (демо)", "rule": "Для каждой операции есть ресурс нужного вида в смене, без пересекающихся резервов, с учётом времени перехода между зонами.", "policy": "hard"},
+    {"code": "TIME_WINDOW", "name": "Возможность приёма в конкретное время", "category": "time_window", "unit": "интервал времени", "period": "прогнозируемое прибытие и обработка", "source": "Резервы, инциденты, окна обслуживания, данные датчиков", "rule": "Путь, маршрут и ресурсы не заняты, не закрыты и имеют достоверное состояние на весь интервал.", "policy": "hard"}
+  ],
+  "plan": {"month_target_wagons": 26000, "actual_base_wagons": 21000, "policy": "soft"},
+  "neighbors": [
+    {"id": "OTR", "name": "Отар (демо)", "side": "west", "travel_min": 90, "max_train_length_m": 900, "receiving_tracks": 2,
+     "processing_min": 60, "locomotives_available": 2, "accepts": ["freight", "transfer"],
+     "travel_min_to": {"ZHT": 190}},
+    {"id": "ZHT", "name": "Жетыген (демо)", "side": "east", "travel_min": 75, "max_train_length_m": 850, "receiving_tracks": 3,
+     "processing_min": 90, "locomotives_available": 2, "accepts": ["freight", "transfer"],
+     "travel_min_to": {"OTR": 190}}
+  ],
+  "maintenance": [
+    {"object_type": "track", "track": "10", "start_h": 13.0, "end_h": 15.0, "reason": "Плановая выправка пути (окно обслуживания)"},
+    {"object_type": "resource", "resource": "ML-2", "start_h": 18.0, "end_h": 19.0, "reason": "ТО-1 маневрового локомотива"}
+  ],
+  "timetable": {
+    "transit": 9, "transfer_in": 6, "cargo": 3, "passenger": 4, "span_h": 10
+  }
+}

@@ -1,0 +1,359 @@
+"""Воспроизводимое заполнение демо-данными.
+
+Начальное состояние полностью определяется (конфигурация станции, сценарий, seed).
+Расписание размещается тем же алгоритмом, что и проверка заявок, поэтому начальный план
+не содержит пересечений, а резервы проходят ограничение-исключение БД.
+"""
+from __future__ import annotations
+
+import logging
+import random
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
+
+from app.core.security import hash_password
+from app.core.timeutil import UTC, utcnow
+from app.domain.topology import build_topology, load_config
+from app.models import (
+    CapacityRule, Device, IndexConfig, MaintenanceWindow, Operation, Park, Plan, Resource, ResourceShift, SimState,
+    Station, TopologyNode, Track, TrackConnection, Train, TransferRequest, User, Wagon, Zone,
+)
+from app.services.model import StationModel
+from app.services.placement import Placer, TrainSpec, commit_to_book
+
+log = logging.getLogger("seed")
+
+SIM_DATE = "2026-10-01"
+SIM_START_LOCAL_H = 12.0
+
+OPERATIONAL_TABLES = [
+    "reservations", "operations", "wagons", "trains", "transfer_requests", "incidents", "recommendations",
+    "plan_versions", "maintenance_windows", "resource_shifts", "resources", "capacity_rules", "plans",
+    "devices", "observations", "telemetry_events", "telemetry_rejects", "manual_overrides",
+    "track_connections", "tracks", "topology_nodes", "zones", "parks", "stations", "state_snapshots",
+    "state_deltas", "index_snapshots", "domain_events", "idempotency_keys",
+]
+
+DEMO_USERS = [
+    ("u-train", "train", "Ахметов А. (поездной диспетчер)", "train_dispatcher"),
+    ("u-station", "station", "Сейтова Г. (станционный диспетчер)", "station_dispatcher"),
+    ("u-duty", "duty", "Ким В. (дежурный по станции)", "duty_officer"),
+    ("u-admin", "admin", "Администратор стенда", "admin"),
+    ("u-viewer", "viewer", "Наблюдатель (жюри)", "observer"),
+]
+DEMO_PASSWORD = "demo123"
+
+DEFAULT_INDEX_CONFIG = {
+    "weights": {"throughput": 0.25, "schedule_deviation": 0.25, "track_utilization": 0.20,
+                "route_conflicts": 0.15, "idle": 0.15},
+    "params": {
+        "throughput": {"window_min": 240, "target_wagons_per_hour": 90},
+        "schedule_deviation": {"window_min": 240, "max_avg_delay_min": 45},
+        "track_utilization": {"target_low": 0.45, "target_high": 0.80, "zero_at_low": 0.0, "zero_at_high": 1.0},
+        "route_conflicts": {"max_conflicts": 8},
+        "idle": {"window_min": 120, "reserve_share": 0.25},
+    },
+    "thresholds": {"normal": 75, "attention": 50},
+    "max_data_age_s": 30,
+}
+
+
+def start_time(cfg: dict) -> datetime:
+    tzi = ZoneInfo(cfg["station"].get("timezone", "Asia/Almaty"))
+    base = datetime.fromisoformat(SIM_DATE).replace(tzinfo=tzi)
+    return (base + timedelta(hours=SIM_START_LOCAL_H)).astimezone(UTC)
+
+
+def local_day(cfg) -> datetime:
+    tzi = ZoneInfo(cfg["station"].get("timezone", "Asia/Almaty"))
+    return datetime.fromisoformat(SIM_DATE).replace(tzinfo=tzi)
+
+
+def ensure_users(db: Session):
+    if db.execute(select(User)).first():
+        return
+    for uid, un, fn, role in DEMO_USERS:
+        db.add(User(id=uid, username=un, full_name=fn, role=role, password_hash=hash_password(DEMO_PASSWORD)))
+    db.flush()
+
+
+def ensure_index_config(db: Session):
+    if not db.execute(select(IndexConfig)).first():
+        db.add(IndexConfig(version=1, config=DEFAULT_INDEX_CONFIG, created_at=utcnow(), created_by="seed", active=True))
+
+
+def wipe(db: Session):
+    db.execute(text("TRUNCATE " + ", ".join(OPERATIONAL_TABLES) + " RESTART IDENTITY CASCADE"))
+
+
+def seed_static(db: Session, cfg: dict, rnd: random.Random, t0: datetime):
+    topo = build_topology(cfg)
+    sid = cfg["station"]["id"]
+    db.add(Station(id=sid, name=cfg["station"]["name"], kind="main", is_demo=True,
+                   timezone=cfg["station"].get("timezone", "Asia/Almaty"), config=cfg))
+    day = local_day(cfg)
+    for n in cfg["neighbors"]:
+        occ = []
+        for _ in range(n.get("receiving_tracks", 2)):
+            ints = []
+            h = rnd.uniform(9, 11)
+            while h < 22:
+                d = rnd.uniform(1.0, 2.5)
+                ints.append([(day + timedelta(hours=h)).isoformat(), (day + timedelta(hours=h + d)).isoformat()])
+                h += d + rnd.uniform(0.7, 2.5)
+            occ.append(ints)
+        db.add(Station(id=n["id"], name=n["name"], kind="neighbor", is_demo=True, timezone="Asia/Almaty",
+                       config={**n, "occupancy": occ}))
+    db.flush()
+    for p in topo["parks"]:
+        db.add(Park(id=p["id"], station_id=sid, name=p["name"], kind=p["kind"]))
+    for n in topo["nodes"]:
+        db.add(TopologyNode(station_id=sid, **n))
+    db.flush()
+    for t in topo["tracks"]:
+        db.add(Track(station_id=sid, name=t["name"], **{k: v for k, v in t.items() if k != "name"}))
+    for c in topo["connections"]:
+        db.add(TrackConnection(station_id=sid, **c))
+    for z in topo["zones"]:
+        db.add(Zone(id=z["code"], station_id=sid, name=z["name"], kind=z["kind"], track_ids=z["track_ids"],
+                    x=z["x"], y=z["y"], params={**z["params"], "display_id": z["id"]}))
+    shifts = cfg.get("shifts", {})
+    for r in cfg["resources"]:
+        db.add(Resource(id=r["id"], station_id=sid, kind=r["kind"], name=r["name"], home_zone_id=r.get("zone"),
+                        status="available", params={"shift": r.get("shift")}))
+    db.flush()
+    for r in cfg["resources"]:
+        if r.get("shift") and r["shift"] in shifts:
+            a, b = shifts[r["shift"]]
+            for dd in (-1, 0, 1):
+                s = day + timedelta(days=dd, hours=a)
+                e = day + timedelta(days=dd, hours=b)
+                db.add(ResourceShift(resource_id=r["id"], start_at=s.astimezone(UTC), end_at=e.astimezone(UTC)))
+    for i, mw in enumerate(cfg.get("maintenance", [])):
+        if mw["object_type"] == "track":
+            oid = f"{sid}-T{mw['track']}"
+        else:
+            oid = mw["resource"]
+        db.add(MaintenanceWindow(id=f"MW-{i + 1}", station_id=sid, object_type=mw["object_type"], object_id=oid,
+                                 start_at=(day + timedelta(hours=mw["start_h"])).astimezone(UTC),
+                                 end_at=(day + timedelta(hours=mw["end_h"])).astimezone(UTC), reason=mw["reason"]))
+    for r in cfg["capacity_rules"]:
+        db.add(CapacityRule(id=f"{sid}-{r['code']}", station_id=sid, code=r["code"], name=r["name"],
+                            category=r["category"], unit=r["unit"], period=r["period"], source=r["source"],
+                            rule_text=r["rule"], value=r.get("value"), policy=r.get("policy", "hard"), active=True))
+    pl = cfg["plan"]
+    db.add(Plan(id=f"{sid}-PLAN-{SIM_DATE[:7]}", station_id=sid, month=SIM_DATE[:7],
+                target_wagons=pl["month_target_wagons"], actual_base_wagons=pl["actual_base_wagons"],
+                policy=pl.get("policy", "soft")))
+    seed_devices(db, cfg, topo)
+    db.flush()
+    return topo
+
+
+def seed_devices(db: Session, cfg: dict, topo: dict):
+    sid = cfg["station"]["id"]
+    for t in topo["tracks"]:
+        x = sum(p[0] for p in t["points"]) / 2
+        y = t["points"][0][1]
+        db.add(Device(id=f"{sid}-TC-{t['number']}", name=f"Рельсовая цепь, {t['name'].lower()}", kind="track_circuit",
+                      station_id=sid, object_id=t["id"], allowed_event_types=["occupancy", "heartbeat"],
+                      period_s=2, stale_after_s=8, x=x, y=y))
+    for n in topo["nodes"]:
+        if n["kind"] == "switch":
+            db.add(Device(id=f"{sid}-SW-{n['id'].split('-')[-1]}", name=f"Контроль положения, {n['name']}",
+                          kind="switch_sensor", station_id=sid, object_id=n["id"],
+                          allowed_event_types=["switch_position", "heartbeat"], period_s=5, stale_after_s=20,
+                          x=n["x"], y=n["y"]))
+        if n["kind"] == "entry":
+            side = "W" if n["side"] == "west" else "E"
+            db.add(Device(id=f"{sid}-RFID-{side}", name=f"RFID-считыватель, {n['name'].lower()}", kind="rfid_reader",
+                          station_id=sid, object_id=n["id"], allowed_event_types=["rfid_read", "heartbeat"],
+                          period_s=5, stale_after_s=30, x=n["x"], y=n["y"]))
+    for r in cfg["resources"]:
+        if r["kind"] == "shunting_loco":
+            db.add(Device(id=f"{sid}-GPS-{r['id']}", name=f"ГНСС-трекер, {r['name']}", kind="loco_gps", station_id=sid,
+                          object_id=r["id"], allowed_event_types=["position", "heartbeat"], period_s=1,
+                          stale_after_s=6, x=0, y=0))
+        if r["kind"] == "cargo_equipment":
+            db.add(Device(id=f"{sid}-EQ-{r['id']}", name=f"Контроллер, {r['name']}", kind="cargo_equipment",
+                          station_id=sid, object_id=r["id"], allowed_event_types=["equipment_state", "heartbeat"],
+                          period_s=5, stale_after_s=20, x=0, y=0))
+    zone_ids = [z["code"] for z in topo["zones"]]
+    if "PTO" in zone_ids:
+        db.add(Device(id=f"{sid}-DIAG-PTO", name="Диагностический комплекс ПТО (буксы, гребни)", kind="repair_diag",
+                      station_id=sid, object_id="PTO", allowed_event_types=["diagnostics", "heartbeat"], period_s=5,
+                      stale_after_s=30, x=0, y=0))
+
+
+# ----------------------------------------------------------------------------- расписание
+WAGON_LEN = {"gondola": 13.92, "covered": 17.64, "tank": 12.02, "flat": 14.62, "hopper": 14.72, "passenger": 24.5}
+
+
+class TimetableBuilder:
+    def __init__(self, db: Session, cfg: dict, rnd: random.Random, t0: datetime):
+        self.db, self.cfg, self.rnd, self.t0 = db, cfg, rnd, t0
+        self.model = StationModel(db, with_reservations=False, data_states={})
+        self.book = self.model.build_book(include_reservations=False, include_data_blocks=False)
+        self.trains: list[tuple[Train, list[Operation]]] = []
+        self.counter = {"transit": 2001, "transfer_in": 3001, "cargo": 2501, "passenger": 101}
+        self.wagon_no = 50000000 + rnd.randint(0, 999) * 1000
+
+    def _wagons(self, n: int, kinds: list[str]) -> list[Wagon]:
+        out = []
+        for i in range(n):
+            self.wagon_no += self.rnd.randint(1, 37)
+            k = self.rnd.choice(kinds)
+            out.append(Wagon(id=f"W{self.wagon_no}", number=str(self.wagon_no), kind=k, length_m=WAGON_LEN[k],
+                             loaded=self.rnd.random() < 0.7, condition="ok", position=i + 1))
+        return out
+
+    def add(self, tpl: str, arrival: datetime, *, wagons: int | None = None, side_in: str | None = None,
+            dwell_min: int | None = None, priority: int | None = None, number: str | None = None,
+            wagon_kinds: list[str] | None = None, exact: bool = False, fixed_tracks: list[str] | None = None,
+            origin: str | None = None) -> tuple[Train, list[Operation]] | None:
+        cfg, rnd = self.cfg, self.rnd
+        steps = [dict(s) for s in cfg["processing"]["templates"][tpl]]
+        kind = {"transit": "freight", "transfer_in": "transfer", "cargo": "freight", "passenger": "passenger"}[tpl]
+        side_in = side_in or rnd.choice(["west", "east"])
+        side_out = "east" if side_in == "west" else "west"
+        if wagons is None:
+            wagons = {"transit": rnd.randint(42, 56), "transfer_in": rnd.randint(30, 44), "cargo": rnd.randint(16, 20),
+                      "passenger": 12}[tpl]
+        kinds = wagon_kinds or (["passenger"] if tpl == "passenger" else
+                                (["gondola"] if tpl == "cargo" else ["gondola", "covered", "tank", "hopper"]))
+        wl = self._wagons(wagons, kinds)
+        loco = 20.0 if tpl == "passenger" else 34.0
+        length = round(sum(w.length_m for w in wl) + loco, 1)
+        num = number or str(self.counter[tpl])
+        if not number:
+            self.counter[tpl] += 2 if tpl != "passenger" else 1
+        dep_nb = None
+        if tpl in ("transit", "cargo", "passenger"):
+            proc = sum(s["duration"] for s in steps if s["kind"] != "departure")
+            dwell = dwell_min if dwell_min is not None else (0 if tpl == "passenger" else rnd.randint(10, 40))
+            dep_nb = arrival + timedelta(minutes=proc + dwell)
+        tid = f"TR-{num}"
+        pr = priority or {"passenger": 5, "transit": 3, "transfer_in": 2, "cargo": 2}[tpl]
+        spec = TrainSpec(train_id=tid, number=num, kind=kind, priority=pr, length_m=length, side_in=side_in,
+                         side_out=side_out, template=steps, arrival=arrival, departure_not_before=dep_nb, wagons=wagons)
+        placer = Placer(self.model, self.book, wait_max_min=150 if not exact else 120)
+        if fixed_tracks:
+            orig = placer.candidates
+            placer.candidates = lambda g, sp, st, res, _o=orig: [t for t in _o(g, sp, st, res) if t in fixed_tracks] \
+                if g == "receiving_departure" else _o(g, sp, st, res)
+        res = placer.place(spec, arrival_exact=exact)
+        if not res.ok:
+            log.warning("Поезд %s не размещён: %s", num, res.track_reasons)
+            return None
+        commit_to_book(self.model, self.book, tid, num, res.ops)
+        neighbor_in = [n["id"] for n in cfg["neighbors"] if n["side"] == side_in]
+        neighbor_out = [n["id"] for n in cfg["neighbors"] if n["side"] == side_out]
+        dep_op = next((o for o in res.ops if o.kind == "departure"), None)
+        train = Train(id=tid, number=num, kind=kind, priority=pr, origin_station_id=origin or (neighbor_in[0] if neighbor_in else None),
+                      destination_station_id=(neighbor_out[0] if neighbor_out and tpl != "transfer_in" else cfg["station"]["id"]),
+                      arrival_side=side_in, departure_side=side_out, wagons_count=wagons, length_m=None,
+                      loco_length_m=loco, status="scheduled", scheduled_arrival=arrival, expected_arrival=arrival,
+                      scheduled_departure=dep_nb if dep_op else None,
+                      expected_departure=dep_op.start if dep_op else None, cargo=None)
+        for w in wl:
+            w.train_id = tid
+        ops = []
+        sid = cfg["station"]["id"]
+        for o in res.ops:
+            ops.append(Operation(id=f"OP-{num}-{o.seq}", station_id=sid, train_id=tid, kind=o.kind, seq=o.seq,
+                                 track_id=o.track_id, from_track_id=o.from_track_id, side=o.side,
+                                 duration_min=o.duration_min, requirements=o.requirements, resource_ids=o.resource_ids,
+                                 route_nodes=o.route_nodes, planned_start=o.start, planned_end=o.end,
+                                 not_before=(arrival if o.kind == "arrival" else (dep_nb if o.kind == "departure" else None)),
+                                 status="planned", reserved=True))
+        self.db.add(train)
+        self.db.flush()
+        self.db.add_all(wl)
+        self.db.add_all(ops)
+        self.trains.append((train, ops))
+        return train, ops
+
+    def random_timetable(self, counts: dict, span_h: float, *, start_offset_h: float = -2.5,
+                         cluster: tuple | None = None):
+        """counts: шаблон -> число поездов. cluster: (шаблон, n, от_ч, до_ч) — пик прибытий."""
+        plan = []
+        for tpl, n in counts.items():
+            for _ in range(n):
+                plan.append((tpl, self.t0 + timedelta(hours=self.rnd.uniform(start_offset_h, span_h + start_offset_h))))
+        if cluster:
+            tpl, n, a, b = cluster
+            for _ in range(n):
+                plan.append((tpl, self.t0 + timedelta(hours=self.rnd.uniform(a, b))))
+        plan.sort(key=lambda p: (p[0] != "passenger", p[1]))
+        for tpl, arr in plan:
+            self.add(tpl, arr.replace(second=0, microsecond=0))
+
+    def finalize(self):
+        """Привести статусы к моменту начала: прошедшие операции — выполнены, текущие — выполняются."""
+        t0 = self.t0
+        for train, ops in self.trains:
+            last_track = None
+            for o in ops:
+                if o.planned_end <= t0:
+                    o.status, o.actual_start, o.actual_end = "done", o.planned_start, o.planned_end
+                    last_track = o.track_id if o.kind != "departure" else None
+                    if o.kind == "uncoupling":
+                        last_track = o.from_track_id
+                elif o.planned_start <= t0:
+                    o.status, o.actual_start = "in_progress", o.planned_start
+                    last_track = o.from_track_id if o.kind in ("shunting", "departure") else o.track_id
+                o.forecast_start, o.forecast_end = o.planned_start, o.planned_end
+            if all(o.status == "done" for o in ops):
+                train.status = "departed" if any(o.kind == "departure" for o in ops) else "completed"
+                train.current_track_id = None
+            elif any(o.status != "planned" for o in ops):
+                train.status = "on_station"
+                train.current_track_id = last_track
+            else:
+                train.status = "approaching" if ops[0].planned_start - t0 < timedelta(minutes=40) else "scheduled"
+        self.db.flush()
+        from app.services.reservations import create_from_ops
+        for train, ops in self.trains:
+            create_from_ops(self.db, self.model, train.id, train.number, ops)
+
+
+def reset_world(db: Session, config_name: str, scenario: str, seed: int):
+    from app.sim.scenarios import SCENARIOS, apply_scenario
+    if scenario not in SCENARIOS:
+        raise ValueError(f"Неизвестный сценарий {scenario}")
+    cfg = load_config(config_name)
+    rnd = random.Random(seed)
+    wipe(db)
+    ensure_users(db)
+    ensure_index_config(db)
+    t0 = start_time(cfg)
+    sim = db.get(SimState, 1)
+    if sim is None:
+        sim = SimState(id=1, model_time=t0)
+        db.add(sim)
+    sim.model_time, sim.speed, sim.running, sim.seed = t0, 10.0, False, seed
+    sim.scenario, sim.station_config = scenario, config_name
+    sim.plan_state_version = (sim.plan_state_version or 0) + 1
+    sim.world, sim.scheduled_events = {"device_faults": {}}, []
+    db.flush()
+    seed_static(db, cfg, rnd, t0)
+    tb = TimetableBuilder(db, cfg, rnd, t0)
+    apply_scenario(db, tb, cfg, scenario, rnd)
+    db.flush()
+    return sim
+
+
+def demo_request(db: Session, cfg, *, number="Z-0001", wagons=40, dep_local_h=13.0, from_id="OTR",
+                 wagon_kind="gondola", split_allowed=True, status="new"):
+    day = local_day(cfg)
+    dep = (day + timedelta(hours=dep_local_h)).astimezone(UTC)
+    now = utcnow()
+    r = TransferRequest(id=f"RQ-{number}", number=number, from_station_id=from_id, to_station_id=cfg["station"]["id"],
+                        wagons_count=wagons, wagon_kind=wagon_kind, cargo="Уголь (демо)", priority=2,
+                        split_allowed=split_allowed, desired_departure=dep, status=status, created_by="u-train",
+                        created_at=now, updated_at=now)
+    db.add(r)
+    return r

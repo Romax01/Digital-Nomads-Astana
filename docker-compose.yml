@@ -1,0 +1,94 @@
+# «Цифровая станция» — демонстрационный стенд.
+# Состав: PostgreSQL, MQTT-брокер Mosquitto, backend (FastAPI), симулятор IoT, frontend (nginx).
+name: digital-station
+
+services:
+  db:
+    image: postgres:16.6-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-station}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-station_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-station}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./backend/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-station} -d ${POSTGRES_DB:-station}"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "${DB_PORT:-5432}:5432"
+
+  mqtt:
+    image: eclipse-mosquitto:2.0.20
+    entrypoint: ["/bin/sh", "/mosquitto/config/entrypoint.sh"]
+    environment:
+      MQTT_INGEST_USER: ${MQTT_INGEST_USER:-ingest}
+      MQTT_INGEST_PASSWORD: ${MQTT_INGEST_PASSWORD:-ingest_dev_password}
+      MQTT_SIM_USER: ${MQTT_SIM_USER:-simulator}
+      MQTT_SIM_PASSWORD: ${MQTT_SIM_PASSWORD:-simulator_dev_password}
+    volumes:
+      - ./mosquitto:/mosquitto/config:ro
+      - mqtt_data:/mosquitto/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 1883 || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+
+  backend:
+    build: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-station}:${POSTGRES_PASSWORD:-station_dev_password}@db:5432/${POSTGRES_DB:-station}
+      MQTT_HOST: mqtt
+      MQTT_PORT: 1883
+      MQTT_USER: ${MQTT_INGEST_USER:-ingest}
+      MQTT_PASSWORD: ${MQTT_INGEST_PASSWORD:-ingest_dev_password}
+      SIM_WORLD_TOKEN: ${SIM_WORLD_TOKEN:-sim_world_dev_token}
+      SECRET_KEY: ${SECRET_KEY:-change_me_dev_secret}
+      STATION_CONFIG: ${STATION_CONFIG:-large}
+    depends_on:
+      db:
+        condition: service_healthy
+      mqtt:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/api/v1/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+  simulator:
+    build: ./simulator
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_PORT: 1883
+      MQTT_USER: ${MQTT_SIM_USER:-simulator}
+      MQTT_PASSWORD: ${MQTT_SIM_PASSWORD:-simulator_dev_password}
+      BACKEND_URL: http://backend:8000
+      SIM_WORLD_TOKEN: ${SIM_WORLD_TOKEN:-sim_world_dev_token}
+      SIM_SEED: ${SIM_SEED:-42}
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+
+volumes:
+  db_data:
+  mqtt_data:
