@@ -67,7 +67,7 @@ export default function Header() {
       {user && (
         <div className="hdr-block">
           <span>{user.full_name}</span>
-          <small>{ROLE_LABEL[user.role]} · <a href="#" onClick={(e) => { e.preventDefault(); disconnect(); setToken(null); useStore.getState().setUser(null); }}>сменить пользователя</a></small>
+          <small>{user.role_label ?? ROLE_LABEL[user.role]} · <a href="#" onClick={(e) => { e.preventDefault(); disconnect(); setToken(null); useStore.getState().setUser(null); }}>сменить пользователя</a></small>
         </div>
       )}
     </header>

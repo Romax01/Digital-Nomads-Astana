@@ -7,6 +7,7 @@ import { api, getToken, setToken } from "./lib/api";
 import { setTimezone } from "./lib/format";
 import { useStore } from "./lib/store";
 import { connect, disconnect, reconnectNow } from "./lib/ws";
+import Admin from "./pages/Admin";
 import Assistant from "./pages/Assistant";
 import Devices from "./pages/Devices";
 import Journal from "./pages/Journal";
@@ -20,6 +21,7 @@ import Settings from "./pages/Settings";
 
 function Nav() {
   const live = useStore((s) => s.live);
+  const user = useStore((s) => s.user);
   const nConf = live ? Object.keys(live.conflicts).length : 0;
   const nAlerts = live ? Object.keys(live.alerts).length : 0;
   const nReq = live ? Object.values(live.requests).filter((r: any) => ["new", "checked"].includes(r.status)).length : 0;
@@ -38,6 +40,7 @@ function Nav() {
       {link("/assistant", "Помощник")}
       <div className="nav-sep" />
       {link("/settings", "Настройки")}
+      {link("/admin", "Пользователи и роли", user && !user.permissions?.includes("users.manage") ? <span className="badge muted" title="Изменения — только администратор">🔒</span> : null)}
       <a className="nav-link" href="/docs" target="_blank" rel="noreferrer">API (Swagger)</a>
     </nav>
   );
@@ -82,6 +85,7 @@ function Shell() {
             <Route path="/journal" element={<Journal />} />
             <Route path="/assistant" element={<Assistant />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/admin" element={<Admin />} />
             <Route path="*" element={<Overview />} />
           </Routes>
         )}

@@ -38,7 +38,7 @@ export default function Login() {
           <div className="col" style={{ gap: 4 }}>
             {users.map((u) => (
               <button key={u.username} className="btn" style={{ justifyContent: "space-between" }} onClick={() => { setUsername(u.username); submit(u.username); }}>
-                <span><b>{u.username}</b> — {u.full_name}</span><span className="muted">{ROLE_LABEL[u.role]}</span>
+                <span><b>{u.username}</b> — {u.full_name}</span><span className="muted">{u.role_label ?? ROLE_LABEL[u.role]}</span>
               </button>
             ))}
             {!users.length && <span className="muted">Список ролей недоступен — backend ещё запускается.</span>}

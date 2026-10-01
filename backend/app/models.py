@@ -351,6 +351,20 @@ class User(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class Role(Base):
+    """Роль. Системные роли (system=True) описаны в коде; пользовательские создаёт администратор."""
+
+    __tablename__ = "roles"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    permissions: Mapped[list] = mapped_column(J, default=list)
+    system: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(TS)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

@@ -73,6 +73,8 @@ def local_day(cfg) -> datetime:
 
 
 def ensure_users(db: Session):
+    from app.services.admin import ensure_system_roles
+    ensure_system_roles(db)
     if db.execute(select(User)).first():
         return
     for uid, un, fn, role in DEMO_USERS:

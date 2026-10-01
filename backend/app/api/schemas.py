@@ -96,3 +96,34 @@ class AskIn(BaseModel):
 
 class ClientMetricsIn(BaseModel):
     samples: list[dict] = Field(default_factory=list)
+
+
+class RoleCreateIn(BaseModel):
+    id: str = Field(min_length=3, max_length=32, description="Идентификатор роли (латиница, цифры, «_»)", examples=["shift_master"])
+    name: str = Field(min_length=3, max_length=80, description="Название роли", examples=["Сменный мастер"])
+    description: str = Field(default="", max_length=500)
+    permissions: list[str] = Field(default_factory=list, description="Права (коды из матрицы прав)")
+
+
+class RoleUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=3, max_length=80)
+    description: str | None = Field(default=None, max_length=500)
+    permissions: list[str] | None = None
+    active: bool | None = None
+
+
+class UserCreateIn(BaseModel):
+    username: str = Field(min_length=3, max_length=64, description="Логин")
+    full_name: str = Field(min_length=2, max_length=120, description="ФИО / подпись в журнале")
+    role: str = Field(description="Идентификатор роли")
+    password: str = Field(min_length=8, max_length=128, description="Пароль, не менее 8 символов")
+
+
+class UserUpdateIn(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=120)
+    role: str | None = None
+    active: bool | None = None
+
+
+class PasswordIn(BaseModel):
+    password: str = Field(min_length=8, max_length=128, description="Новый пароль, не менее 8 символов")

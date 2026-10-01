@@ -16,7 +16,7 @@ from app.core import metrics
 from app.core.audit import audit, domain_event
 from app.core.errors import AppError, Conflict, Forbidden, NotFound, Unauthorized
 from app.core.idempotency import run_idempotent
-from app.core.permissions import ROLES, can, matrix, require
+from app.core.permissions import ROLES, all_roles, can, invalidate, matrix, require, role_label, role_permissions
 from app.core.security import current_user, issue_token, verify_password
 from app.core.timeutil import aware, iso, utcnow
 from app.db import get_db
@@ -54,23 +54,26 @@ def login(body: S.LoginIn, db: Session = Depends(get_db)):
 
 @router.get("/auth/me", tags=["Доступ"], summary="Текущий пользователь и его права")
 def me(user: User = Depends(current_user)):
-    return {**_user(user), "permissions": [a for a, (_, roles) in __import__("app.core.permissions", fromlist=["PERMISSIONS"]).PERMISSIONS.items() if user.role in roles]}
+    return {**_user(user), "permissions": sorted(role_permissions(user.role))}
 
 
 @router.get("/auth/demo-users", tags=["Доступ"], summary="Демонстрационные учётные записи (только для стенда)")
 def demo_users(db: Session = Depends(get_db)):
-    return [{"username": u.username, "full_name": u.full_name, "role": u.role, "role_label": ROLES[u.role]}
-            for u in db.execute(select(User).order_by(User.id)).scalars()]
+    from app.sim.seed import DEMO_USERS
+    demo = {un for _, un, _, _ in DEMO_USERS}  # на экране входа — только демо-учётки, не созданные администратором
+    return [{"username": u.username, "full_name": u.full_name, "role": u.role, "role_label": role_label(u.role)}
+            for u in db.execute(select(User).where(User.username.in_(demo), User.active.is_(True))
+                                .order_by(User.id)).scalars()]
 
 
 @router.get("/permissions", tags=["Доступ"], summary="Матрица прав (предварительная ролевая модель MVP)")
 def permissions():
-    return {"roles": ROLES, "matrix": matrix(),
+    return {"roles": all_roles(), "system_roles": list(ROLES), "matrix": matrix(),
             "note": "Ролевая модель — допущение MVP; требует проверки полномочий профильным специалистом."}
 
 
 def _user(u: User) -> dict:
-    return {"id": u.id, "username": u.username, "full_name": u.full_name, "role": u.role, "role_label": ROLES[u.role]}
+    return {"id": u.id, "username": u.username, "full_name": u.full_name, "role": u.role, "role_label": role_label(u.role)}
 
 
 # ------------------------------------------------------------------ состояние и топология
@@ -642,7 +645,7 @@ def sim_world(x_sim_token: str | None = Header(default=None), db: Session = Depe
 @router.get("/audit", tags=["Журнал"], summary="Аудит значимых изменений")
 def audit_log(limit: int = Query(200, le=1000), db: Session = Depends(get_db), _: User = Depends(require("state.view"))):
     return [{"id": a.id, "ts": iso(a.ts), "model_time": iso(a.model_time), "username": a.username,
-             "role": a.role, "role_label": ROLES.get(a.role, a.role), "action": a.action, "entity_type": a.entity_type,
+             "role": a.role, "role_label": role_label(a.role) if a.role != "system" else "Система", "action": a.action, "entity_type": a.entity_type,
              "entity_id": a.entity_id, "summary": a.summary, "reason": a.reason, "before": a.before, "after": a.after}
             for a in db.execute(select(AuditEvent).order_by(desc(AuditEvent.id)).limit(limit)).scalars()]
 
@@ -731,3 +734,74 @@ def client_metrics(body: S.ClientMetricsIn, _: User = Depends(current_user)):
             if isinstance(s.get(k), (int, float)) and 0 <= s[k] < 60000:
                 metrics.observe(k, s[k])
     return {"ok": True}
+
+
+# ------------------------------------------------------------------ администрирование: роли и пользователи
+def _admin_call(db, user, key, endpoint, body, fn):
+    out = run_idempotent(db, user, key, endpoint, body, fn)
+    invalidate()  # права пользовательских ролей применяются сразу после фиксации
+    return out
+
+
+@router.get("/admin/roles", tags=["Доступ"], summary="Роли и их права (только администратор)")
+def admin_roles(db: Session = Depends(get_db), _: User = Depends(require("users.manage"))):
+    from app.services import admin
+    out = admin.list_roles(db)
+    db.commit()
+    return out
+
+
+@router.post("/admin/roles", tags=["Доступ"], summary="Создать пользовательскую роль (только администратор)")
+def admin_create_role(body: S.RoleCreateIn, db: Session = Depends(get_db), user: User = Depends(require("users.manage")),
+                      idempotency_key: str | None = Header(default=None)):
+    from app.services import admin
+    return _admin_call(db, user, idempotency_key, "POST /admin/roles", body.model_dump(),
+                       lambda: admin.create_role(db, user, body.model_dump()))
+
+
+@router.put("/admin/roles/{role_id}", tags=["Доступ"], summary="Изменить пользовательскую роль (только администратор)")
+def admin_update_role(role_id: str, body: S.RoleUpdateIn, db: Session = Depends(get_db),
+                      user: User = Depends(require("users.manage")), idempotency_key: str | None = Header(default=None)):
+    from app.services import admin
+    return _admin_call(db, user, idempotency_key, f"PUT /admin/roles/{role_id}", body.model_dump(),
+                       lambda: admin.update_role(db, user, role_id, body.model_dump()))
+
+
+@router.delete("/admin/roles/{role_id}", tags=["Доступ"], summary="Удалить пользовательскую роль (только администратор)")
+def admin_delete_role(role_id: str, db: Session = Depends(get_db), user: User = Depends(require("users.manage")),
+                      idempotency_key: str | None = Header(default=None)):
+    from app.services import admin
+    return _admin_call(db, user, idempotency_key, f"DELETE /admin/roles/{role_id}", {},
+                       lambda: admin.delete_role(db, user, role_id))
+
+
+@router.get("/admin/users", tags=["Доступ"], summary="Пользователи (только администратор)")
+def admin_users(db: Session = Depends(get_db), _: User = Depends(require("users.manage"))):
+    from app.services import admin
+    return admin.list_users(db)
+
+
+@router.post("/admin/users", tags=["Доступ"], summary="Создать пользователя и назначить роль (только администратор)")
+def admin_create_user(body: S.UserCreateIn, db: Session = Depends(get_db), user: User = Depends(require("users.manage")),
+                      idempotency_key: str | None = Header(default=None)):
+    from app.services import admin
+    safe = {k: v for k, v in body.model_dump().items() if k != "password"}
+    return _admin_call(db, user, idempotency_key, "POST /admin/users", safe,
+                       lambda: admin.create_user(db, user, body.model_dump()))
+
+
+@router.put("/admin/users/{user_id}", tags=["Доступ"], summary="Сменить роль, имя или заблокировать пользователя")
+def admin_update_user(user_id: str, body: S.UserUpdateIn, db: Session = Depends(get_db),
+                      user: User = Depends(require("users.manage")), idempotency_key: str | None = Header(default=None)):
+    from app.services import admin
+    return _admin_call(db, user, idempotency_key, f"PUT /admin/users/{user_id}", body.model_dump(),
+                       lambda: admin.update_user(db, user, user_id, body.model_dump()))
+
+
+@router.post("/admin/users/{user_id}/password", tags=["Доступ"], summary="Задать пароль пользователю")
+def admin_set_password(user_id: str, body: S.PasswordIn, db: Session = Depends(get_db),
+                       user: User = Depends(require("users.manage"))):
+    from app.services import admin
+    out = admin.set_password(db, user, user_id, body.password)
+    db.commit()
+    return out

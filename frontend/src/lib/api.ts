@@ -41,6 +41,7 @@ export const api = {
   post: <T = any>(url: string, body?: any, key?: string) => request<T>("POST", url, body ?? {}, { idempotent: true, key }),
   put: <T = any>(url: string, body?: any) => request<T>("PUT", url, body ?? {}),
   postPlain: <T = any>(url: string, body?: any) => request<T>("POST", url, body ?? {}),
+  del: <T = any>(url: string) => request<T>("DELETE", url, undefined, { idempotent: true }),
 };
 
 export async function download(url: string, filename: string) {

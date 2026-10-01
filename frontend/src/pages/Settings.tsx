@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { fmtFull, fmtHM } from "../lib/format";
 import { DEVICE_KIND, ROLE_LABEL } from "../lib/labels";
 import { can, useStore, useViewState } from "../lib/store";
+import { PermissionMatrix } from "./Admin";
 
 export default function Settings() {
   const user = useStore((s) => s.user);
@@ -48,17 +49,7 @@ export default function Settings() {
       </section>
       <IndexConfig disabledReason={cfgAdmin} />
       <Policies disabledReason={cfgAdmin} />
-      <section className="panel">
-        <div className="panel-h"><h2>Матрица прав (предварительная ролевая модель MVP)</h2></div>
-        <div className="panel-b" style={{ overflow: "auto" }}>
-          {!perms.data ? <Loading /> : <>
-            <p className="muted" style={{ marginTop: 0 }}>{perms.data.note} Права проверяются на сервере для каждой изменяющей операции.</p>
-            <table className="t"><thead><tr><th>Действие</th>{Object.keys(perms.data.roles).map((r) => <th key={r}>{ROLE_LABEL[r]}</th>)}</tr></thead>
-              <tbody>{perms.data.matrix.map((m: any) => <tr key={m.action}><td>{m.title}<div className="faint mono">{m.action}</div></td>
-                {Object.keys(perms.data.roles).map((r) => <td key={r} aria-label={m.roles.includes(r) ? "разрешено" : "запрещено"}>{m.roles.includes(r) ? <span style={{ color: "var(--ok)" }}>✓ да</span> : <span className="faint">— нет</span>}</td>)}</tr>)}</tbody></table>
-          </>}
-        </div>
-      </section>
+      {perms.data && <PermissionMatrix data={perms.data} />}
     </div>
   );
 }

@@ -97,3 +97,34 @@ curl -s -X POST $API/requests/RQ-Z-0001/confirm -H "Authorization: Bearer $DUTY"
 ```
 
 Время в ответах указано в ISO 8601 UTC (`…Z`); интерфейс показывает его в часовом поясе станции.
+
+## Администрирование: роли и пользователи (только администратор)
+
+| Метод | Путь | Назначение |
+|---|---|---|
+| GET | `/api/v1/admin/roles` | роли, их права и число пользователей |
+| POST | `/api/v1/admin/roles` | создать роль `{id, name, description, permissions[]}` |
+| PUT | `/api/v1/admin/roles/{id}` | изменить пользовательскую роль (название, описание, права, `active`) |
+| DELETE | `/api/v1/admin/roles/{id}` | удалить пользовательскую роль, если она никому не назначена |
+| GET | `/api/v1/admin/users` | пользователи |
+| POST | `/api/v1/admin/users` | создать пользователя `{username, full_name, role, password}` (пароль ≥ 8 символов) |
+| PUT | `/api/v1/admin/users/{id}` | сменить роль, имя, заблокировать или разблокировать (`active`) |
+| POST | `/api/v1/admin/users/{id}/password` | задать пароль |
+
+Коды ошибок:
+- `FORBIDDEN` — роль без `users.manage`;
+- `PERMISSION_RESERVED` — попытка выдать роли право управлять ролями;
+- `SYSTEM_ROLE_READONLY` — изменение системной роли;
+- `ROLE_EXISTS`, `ROLE_NAME_EXISTS` — роль с таким идентификатором или названием уже есть;
+- `ROLE_IN_USE` — удаление назначенной роли;
+- `UNKNOWN_ROLE`, `UNKNOWN_PERMISSION` — неизвестная роль или право;
+- `USER_EXISTS` — логин занят;
+- `BAD_ROLE_ID`, `BAD_USERNAME` — недопустимый формат;
+- `LAST_ADMIN` — нельзя убрать последнего администратора.
+
+Пример:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/roles -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/json" \
+  -d '{"id":"shift_master","name":"Сменный мастер","permissions":["incident.manage","request.check"]}'
+```
