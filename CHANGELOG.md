@@ -2,6 +2,13 @@
 
 Формат — по мотивам [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/).
 
+## [1.6.2] — 2026-10-02
+
+### Исправлено
+- **`start-digital-station.bat` из ZIP-архива GitHub** закрывался с ошибками `'.ps1' is not recognized`:
+  - в архив файл попадал с переносами LF, а cmd такой файл читает неверно;
+  - теперь `.bat` хранится в репозитории с CRLF (`*.bat -text` в `.gitattributes`) и работает и после `git clone`, и после «Download ZIP».
+
 ## [1.6.1] — 2026-10-02
 
 ### Изменено

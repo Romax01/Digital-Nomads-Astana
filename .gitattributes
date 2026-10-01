@@ -1,4 +1,5 @@
 # переносы строк не зависят от настроек git на другом ПК
 *.sh text eol=lf
 mosquitto/* text eol=lf
-*.bat text eol=crlf
+# .bat хранится в репозитории с CRLF (-text): так он остаётся рабочим и в ZIP-архиве GitHub
+*.bat -text
