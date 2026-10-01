@@ -39,7 +39,7 @@ try { Start-Transcript -Path $env:DS_LOG -Force | Out-Null } catch { }
 trap { Write-Host ""; Write-Host ("НЕПРЕДВИДЕННАЯ ОШИБКА: " + $_) -ForegroundColor Red; Write-Host "Журнал: $env:DS_LOG"; try { Stop-Transcript | Out-Null } catch { }; exit 2 }
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 try { [Console]::InputEncoding = [Text.Encoding]::UTF8 } catch { }
-$Repo = "https://github.com/Romax01/Digtal-Nomads-Astana"
+$Repo = "https://github.com/Romax01/Digital-Nomads-Astana"
 $ZipUrl = "$Repo/archive/refs/heads/main.zip"
 $Action = (($env:DS_ARGS + "").Trim().ToLower() -split "\s+")[0]
 if (-not $Action) { $Action = "start" }
