@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError, setToken } from "../lib/api";
 import { ROLE_LABEL } from "../lib/labels";
 import { useStore } from "../lib/store";
+import { BrandMark, Copyright, Icon } from "../components/Brand";
 
 const DESK = new Set(["train_dispatcher", "station_dispatcher", "duty_officer", "admin", "observer"]);
 
@@ -24,7 +25,7 @@ export default function Login() {
   return (
     <div className="login-wrap">
       <main className="panel login">
-        <div className="panel-h"><h1 className="grow">Цифровая станция</h1><span className="demo-flag">ДЕМО</span></div>
+        <div className="panel-h login-brand"><BrandMark size={34} /><h1 className="grow">Цифровая станция</h1><span className="demo-flag">ДЕМО</span></div>
         <div className="panel-b col">
           <p className="muted" style={{ margin: 0 }}>
             Учебно-демонстрационная система поддержки решений диспетчера. Данные синтетические; система не управляет
@@ -36,9 +37,9 @@ export default function Login() {
             {err && <div className="callout bad" role="alert">{err.message}</div>}
             <button className="btn primary" type="submit" disabled={busy}>Войти</button>
           </form>
-          <a className="btn" href="/mobile" style={{ justifyContent: "center" }}>📱 Мобильное приложение работников ПТО (/mobile)</a>
+          <a className="btn" href="/mobile" style={{ justifyContent: "center" }}><Icon name="mobile" size={16} />Мобильное приложение работников ПТО</a>
           <h4 style={{ marginTop: 8 }}>Демонстрационные роли (пароль demo123)</h4>
-          <div className="col" style={{ gap: 4 }}>
+          <div className="col login-roles" style={{ gap: 4 }}>
             {users.filter((u) => DESK.has(u.role)).map((u) => (
               <button key={u.username} className="btn" style={{ justifyContent: "space-between" }} onClick={() => { setUsername(u.username); submit(u.username); }}>
                 <span><b>{u.username}</b> — {u.full_name}</span><span className="muted">{u.role_label ?? ROLE_LABEL[u.role]}</span>
@@ -48,6 +49,7 @@ export default function Login() {
           </div>
         </div>
       </main>
+      <Copyright />
     </div>
   );
 }

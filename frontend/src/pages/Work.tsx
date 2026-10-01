@@ -8,6 +8,7 @@ import { useStore } from "../lib/store";
 import { Chip, DefectCard, DEFECT_CLS, URG_CLS, URG_ICON, WO_CLS, WorkCard } from "../mobile/cards";
 import { ago, fmtDT, useM } from "../mobile/mlib";
 import "../mobile/mobile.css";
+import { Icon } from "../components/Brand";
 
 /** Синхронизация словарей и счётчика событий кабинета с мобильными карточками. */
 function useBridge() {
@@ -115,8 +116,8 @@ export function NotificationsBell() {
   if (!data) return null;
   return (
     <div className="bell">
-      <button className="btn ghost small" aria-label={`Уведомления: ${data.unread} новых`} onClick={() => setOpen(!open)}>
-        🔔{data.unread ? <span className="badge bad" style={{ marginLeft: 4 }}>{data.unread}</span> : null}
+      <button className="btn ghost icon-btn" title="Уведомления" aria-label={`Уведомления: ${data.unread} новых`} onClick={() => setOpen(!open)}>
+        <Icon name="bell" />{data.unread ? <span className="badge solid bad bell-count">{data.unread}</span> : null}
       </button>
       {open && (
         <div className="bell-pop panel" role="dialog" aria-label="Уведомления">

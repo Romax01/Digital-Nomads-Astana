@@ -11,6 +11,7 @@ import { TRACK_STATUS } from "../lib/labels";
 import { useStore, useViewState } from "../lib/store";
 import { hasWebGL } from "../lib/webgl";
 import { openStation } from "../twin/actions";
+import { Icon } from "../components/Brand";
 
 const TwinScene = lazy(() => import("../twin/TwinScene"));
 
@@ -44,7 +45,8 @@ function SearchBox() {
   };
   return (
     <form className="tw-search" role="search" onSubmit={(e) => { e.preventDefault(); go(q); }}>
-      <input list="tw-search-list" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск: станция, поезд, путь…" aria-label="Поиск объекта" />
+      <Icon name="search" size={16} />
+      <input list="tw-search-list" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Станция, поезд, путь…" aria-label="Поиск объекта" />
       <datalist id="tw-search-list">{options.slice(0, 300).map((o) => <option key={o.label} value={o.label} />)}</datalist>
       <button className="btn small" type="submit">Найти</button>
     </form>
@@ -114,32 +116,39 @@ export default function Overview() {
   const stationName = topo?.station.name ?? st.meta.station_name;
   return (
     <div ref={root} className={`twin-page ${panels.right ? "" : "no-right"} ${panels.bottom ? "" : "no-bottom"} ${panels.ganttFull ? "gantt-full" : ""} ${panels.fullscreen ? "is-fs" : ""}`}>
-      <div className="tw-topbar">
-        <nav className="tw-crumbs" aria-label="Уровень просмотра">
-          <button className={level === "network" ? "on" : ""} onClick={() => setCam("network")} title="Железнодорожная сеть: станции и перегоны">Сеть</button>
-          <span aria-hidden>›</span>
-          <button className={level === "station" ? "on" : ""} onClick={() => setCam("station")} title="Подробная модель основной станции">{stationName}</button>
-          {level === "station" && <button className="btn small" onClick={() => setCam("network")}>← Вернуться к сети</button>}
+      <div className="tw-topbar" role="toolbar" aria-label="Управление 3D-двойником">
+        <nav className="tw-group tw-crumbs" aria-label="Уровень просмотра">
+          <span className="tw-group-label">Уровень</span>
+          <button className={`crumb ${level === "network" ? "on" : ""}`} onClick={() => setCam("network")} title="Железнодорожная сеть: станции и перегоны"><Icon name="network" size={16} />Сеть</button>
+          <span className="sep" aria-hidden>›</span>
+          <button className={`crumb ${level === "station" ? "on" : ""}`} onClick={() => setCam("station")} title="Подробная модель основной станции"><Icon name="station" size={16} />{stationName}</button>
+          {level === "station" && <button className="btn small ghost" onClick={() => setCam("network")} title="Вернуться к сети" aria-label="Вернуться к сети"><Icon name="back" size={15} /><span className="lbl-wide">К сети</span></button>}
         </nav>
-        <div className="seg" role="group" aria-label="Камера">
-          <button aria-pressed={cam === "network"} onClick={() => setCam("network")}>Сеть</button>
-          <button aria-pressed={cam === "station"} onClick={() => setCam("station")}>Общий вид станции</button>
-          <button aria-pressed={cam === "selected"} disabled={!selection} title={selection ? "Показать выбранный объект" : "Сначала выберите объект на сцене"} onClick={() => setCam("selected")}>Выбранный объект</button>
-          <button aria-pressed={cam === "follow"} disabled={!selTrain} title={selTrain ? (cam === "follow" ? "Нажмите, чтобы выключить слежение" : "Камера будет следовать за выбранным поездом") : "Сначала выберите поезд"}
-            onClick={() => setCam(cam === "follow" ? "free" : "follow")}>{cam === "follow" ? "◉ Следую за поездом" : "Следовать за поездом"}</button>
+        <span className="tw-divider" aria-hidden />
+        <div className="tw-group tw-cam">
+          <span className="tw-group-label">Камера</span>
+          <div className="seg" role="group" aria-label="Камера">
+            <button aria-pressed={cam === "network"} onClick={() => setCam("network")} title="Общий вид сети"><Icon name="network" size={15} /><span className="cam-text">Сеть</span></button>
+            <button aria-pressed={cam === "station"} onClick={() => setCam("station")} title="Общий вид станции"><Icon name="station" size={15} /><span className="cam-text">Станция</span></button>
+            <button aria-pressed={cam === "selected"} disabled={!selection} title={selection ? "Показать выбранный объект" : "Сначала выберите объект на сцене"} onClick={() => setCam("selected")}><Icon name="target" size={15} /><span className="cam-text">Объект</span></button>
+            <button aria-pressed={cam === "follow"} disabled={!selTrain} title={selTrain ? (cam === "follow" ? "Нажмите, чтобы выключить слежение" : "Камера будет следовать за выбранным поездом") : "Сначала выберите поезд"}
+              onClick={() => setCam(cam === "follow" ? "free" : "follow")}><Icon name="follow" size={15} /><span className="cam-text">{cam === "follow" ? "Слежу" : "Следовать"}</span></button>
+          </div>
         </div>
+        <span className="tw-divider" aria-hidden />
         <SearchBox />
-        <div className="tw-kpis">
+        <span className="tw-divider" aria-hidden />
+        <div className="tw-group tw-kpis" aria-label="Показатели">
           <button className="tw-kpi" onClick={() => nav("/load")} title="Индекс эффективности (подробно — «Загрузка и индекс»)">Индекс <b>{st.index?.value ?? "—"}</b></button>
-          <button className={`tw-kpi ${nConf ? "bad" : "ok"}`} onClick={() => { setTab("conflicts"); setPanels({ right: true }); }}>{nConf ? `⚠ Конфликты ${nConf}` : "✓ Конфликтов нет"}</button>
-          <span className="tw-kpi">Задержки ≥5′ <b>{k.delayed_trains}</b></span>
-          <span className="tw-kpi">Свободно А <b>{k.free_rd_tracks}/{k.rd_tracks}</b></span>
-          <button className={`tw-kpi ${nAlerts ? "unknown" : "ok"}`} onClick={() => { setTab("iot"); setPanels({ right: true }); }}>{nAlerts ? `? Датчики ${nAlerts}` : "✓ Датчики"}</button>
+          <button className={`tw-kpi ${nConf ? "bad" : "ok"}`} onClick={() => { setTab("conflicts"); setPanels({ right: true }); }} title="Конфликты в прогнозе">{nConf ? <>⚠ <span className="lbl-wide">Конфликты </span>{nConf}</> : <>✓ <span className="lbl-wide">Конфликтов нет</span><span className="lbl-short">0</span></>}</button>
+          <span className="tw-kpi" title="Поезда с задержкой не менее 5 минут"><span className="lbl-wide">Задержки </span>≥5′ <b>{k.delayed_trains}</b></span>
+          <span className="tw-kpi" title="Свободные пути приёмо-отправочного парка А"><span className="lbl-wide">Свободно </span>А <b>{k.free_rd_tracks}/{k.rd_tracks}</b></span>
+          <button className={`tw-kpi ${nAlerts ? "unknown" : "ok"}`} onClick={() => { setTab("iot"); setPanels({ right: true }); }} title="Проблемы датчиков"><Icon name="devices" size={14} />{nAlerts ? <> ? <span className="lbl-mid">Датчики </span>{nAlerts}</> : <> ✓<span className="lbl-mid"> Датчики</span></>}</button>
         </div>
-        <div className="row" style={{ gap: 4, marginLeft: "auto" }}>
-          <button className="btn small" aria-pressed={panels.right} onClick={() => setPanels({ right: !panels.right })} title="Показать/скрыть правую панель">▤ Панель</button>
-          <button className="btn small" aria-pressed={panels.bottom} onClick={() => setPanels({ bottom: !panels.bottom })} title="Показать/скрыть временную шкалу">▭ Шкала</button>
-          <button className="btn small" onClick={fullscreen} title="Полноэкранный режим (Esc — выход)">{panels.fullscreen ? "⤡ Выйти" : "⤢ Во весь экран"}</button>
+        <div className="tw-group tw-view" role="group" aria-label="Вид">
+          <button className="btn ghost icon-btn" aria-pressed={panels.right} onClick={() => setPanels({ right: !panels.right })} title={panels.right ? "Скрыть правую панель" : "Показать правую панель"} aria-label="Правая панель"><Icon name="panel" /></button>
+          <button className="btn ghost icon-btn" aria-pressed={panels.bottom} onClick={() => setPanels({ bottom: !panels.bottom })} title={panels.bottom ? "Скрыть временную шкалу" : "Показать временную шкалу"} aria-label="Временная шкала"><Icon name="timeline" /></button>
+          <button className="btn ghost icon-btn" aria-pressed={panels.fullscreen} onClick={fullscreen} title={panels.fullscreen ? "Выйти из полноэкранного режима (Esc)" : "Во весь экран"} aria-label="Во весь экран"><Icon name={panels.fullscreen ? "exitfs" : "fullscreen"} /></button>
         </div>
       </div>
       <section className="tw-main" aria-label="3D-цифровой двойник">

@@ -9,6 +9,7 @@ import { ago, clearImageCache, connectWork, disconnectWork, fmtDT, useM, usePerm
 import { listItems, otherUsersPending, OutItem, refreshCount, retryItem, delItem, syncNow } from "./outbox";
 import ReportForm from "./ReportForm";
 import "./mobile.css";
+import { Copyright } from "../components/Brand";
 
 const ROLE_HINT: Record<string, string> = {
   wagon_inspector: "Осмотр, сообщения о дефектах, назначенные осмотры",
@@ -50,6 +51,7 @@ function MLogin({ onDone }: { onDone: () => void }) {
         ))}
       </>}
       <small className="m-muted">Роли и права назначает администратор. Демонстрационная система поддержки решений: действия не являются командами железнодорожной автоматике.</small>
+      <div className="m-copy-in"><Copyright compact /></div>
     </div>
   );
 }
@@ -319,6 +321,7 @@ export default function MobileApp() {
         <p className="m-muted">Мобильный раздел — для работников ПТО и станционного диспетчера. Работайте в основном приложении.</p>
         <button className="m-btn primary" onClick={() => location.assign("/")}>Основное приложение</button>
         <button className="m-btn" onClick={logout}>Сменить пользователя</button>
+        <div className="m-copy-in"><Copyright compact /></div>
       </div>
     );
   }
@@ -341,6 +344,7 @@ export default function MobileApp() {
         </Routes>
       </main>
       {toast && <div className={`m-toast ${toast.kind}`} role="status">{toast.text}</div>}
+      <div className="m-copy"><Copyright compact /></div>
       <nav className="m-nav" aria-label="Разделы">
         <NavLink to="/mobile" end>⌂<span>Главная</span></NavLink>
         {canReport && <NavLink to="/mobile/report">＋<span>Сообщить</span></NavLink>}

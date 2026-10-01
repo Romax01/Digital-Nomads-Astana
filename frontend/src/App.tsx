@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, NavLink, Route, Routes } from "react-router-dom";
+import { Copyright, Icon } from "./components/Brand";
 import Header from "./components/Header";
 import { ForecastBar, ReplayBar } from "./components/Panels";
 import { Loading, Toasts } from "./components/ui";
@@ -26,36 +27,47 @@ const MobileApp = lazy(() => import("./mobile/MobileApp"));
 function Nav() {
   const live = useStore((s) => s.live);
   const user = useStore((s) => s.user);
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("ds_nav") === "1"; } catch { return false; } });
+  const toggle = () => setCollapsed((c) => { try { localStorage.setItem("ds_nav", c ? "0" : "1"); } catch { /* */ } return !c; });
   const nConf = live ? Object.keys(live.conflicts).length : 0;
   const nAlerts = live ? Object.keys(live.alerts).length : 0;
   const nReq = live ? Object.values(live.requests).filter((r: any) => ["new", "checked"].includes(r.status)).length : 0;
   const nDef = live ? Object.values(live.trains).reduce((a: number, t: any) => a + (t.defects || []).filter((d: any) => d.status === "submitted").length, 0) : 0;
-  const link = (to: string, label: string, badge?: React.ReactNode) => (
-    <NavLink to={to} end className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>{label}{badge}</NavLink>
+  const link = (to: string, label: string, icon: string, badge?: React.ReactNode) => (
+    <NavLink to={to} end className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} title={collapsed ? label : undefined}>
+      <Icon name={icon} /><span className="nav-label">{label}</span>{badge}
+    </NavLink>
   );
   return (
-    <nav className="app-nav" aria-label="Разделы">
-      {link("/", "Обзор станции", nConf ? <span className="badge bad">⚠ {nConf}</span> : null)}
-      {link("/requests", "Заявки", nReq ? <span className="badge info">{nReq}</span> : null)}
-      {link("/schedule", "Расписание")}
-      {link("/plan", "План и Гант")}
-      {link("/load", "Загрузка и индекс")}
-      {link("/devices", "Датчики и связь", nAlerts ? <span className="badge unknown">? {nAlerts}</span> : null)}
-      {user?.permissions?.includes("defect.view_station") && link("/work", "Сообщения работников", nDef ? <span className="badge warn">{nDef}</span> : null)}
-      {link("/journal", "Журнал")}
-      {link("/assistant", "Помощник")}
-      <div className="nav-sep" />
-      {link("/settings", "Настройки")}
+    <nav className={`app-nav ${collapsed ? "collapsed" : ""}`} aria-label="Разделы">
+      <div className="nav-group">Работа</div>
+      {link("/", "Обзор станции", "overview", nConf ? <span className="badge bad">⚠ {nConf}</span> : null)}
+      {link("/requests", "Заявки", "requests", nReq ? <span className="badge info">{nReq}</span> : null)}
+      {link("/schedule", "Расписание", "schedule")}
+      {link("/plan", "План и Гант", "plan")}
+      <div className="nav-group">Данные</div>
+      {link("/load", "Загрузка и индекс", "load")}
+      {link("/devices", "Датчики и связь", "devices", nAlerts ? <span className="badge unknown">? {nAlerts}</span> : null)}
+      {user?.permissions?.includes("defect.view_station") && link("/work", "Сообщения работников", "work", nDef ? <span className="badge warn">{nDef}</span> : null)}
+      {link("/journal", "Журнал", "journal")}
+      {link("/assistant", "Помощник", "assistant")}
+      <div className="nav-group">Система</div>
+      {link("/settings", "Настройки", "settings")}
       {/* разделы администратора не показываются другим ролям */}
-      {user?.permissions?.includes("users.manage") && link("/admin", "Пользователи и роли")}
+      {user?.permissions?.includes("users.manage") && link("/admin", "Пользователи и роли", "admin")}
       {user?.permissions?.includes("api.docs") && (
-        <a className="nav-link" href="/docs" target="_blank" rel="noreferrer" onClick={async (e) => {
+        <a className="nav-link" href="/docs" target="_blank" rel="noreferrer" title={collapsed ? "API (Swagger)" : undefined} onClick={async (e) => {
           e.preventDefault();
           const w = window.open("about:blank", "_blank");
           try { await api.postPlain("/api/v1/auth/docs-session"); if (w) w.location.href = "/docs"; }
           catch { w?.close(); useStore.getState().toast("error", "Описание API недоступно"); }
-        }}>API (Swagger)</a>
+        }}><Icon name="api" /><span className="nav-label">API (Swagger)</span></a>
       )}
+      <div className="grow" />
+      <a className="nav-link nav-mobile" href="/mobile" title="Мобильное приложение работников ПТО"><Icon name="mobile" /><span className="nav-label">Мобильное приложение</span></a>
+      <button className="nav-collapse" onClick={toggle} aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"} title={collapsed ? "Развернуть меню" : "Свернуть меню"}>
+        <Icon name={collapsed ? "expand" : "collapse"} /><span className="nav-label">Свернуть меню</span>
+      </button>
     </nav>
   );
 }
@@ -93,6 +105,7 @@ function Shell() {
           <button className="btn small" onClick={reconnectNow}>Переподключиться</button>
         </div>
       )}
+      <div className="app-body">
       <Nav />
       <main id="main" className="app-main" tabIndex={-1}>
         {/* панели режимов — на уровне приложения: «История» и «Прогноз» работают на всех разделах */}
@@ -115,6 +128,8 @@ function Shell() {
           </Routes>
         )}
       </main>
+      </div>
+      <footer className="app-footer"><Copyright /></footer>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { NotificationsBell } from "../pages/Work";
+import { BrandMark, Icon } from "./Brand";
 import { useEffect, useState } from "react";
 import { setToken } from "../lib/api";
 import { fmtHM, fmtHMS, tzLabel } from "../lib/format";
@@ -31,45 +32,53 @@ export default function Header() {
     ? (age !== null && age > 5 ? { cls: "warn", text: `Обновления задерживаются (${Math.round(age)} с)` } : { cls: "ok", text: "Подключено" })
     : conn === "reconnecting" ? { cls: "warn", text: "Переподключение…" } : conn === "connecting" ? { cls: "info", text: "Подключение…" }
       : { cls: "bad", text: "Нет соединения" };
+  const initials = (user?.full_name || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
   return (
     <header className="app-header">
       <div className="brand">
-        <b>Цифровая станция</b>
-        <span className="row" style={{ gap: 6 }}>{meta?.station_name ?? "—"} {meta?.is_demo && <span className="demo-flag" title="Схема, ограничения и показатели демонстрационные">ДЕМО</span>}</span>
+        <BrandMark />
+        <div className="brand-text">
+          <b>Цифровая станция</b>
+          <span>{meta?.station_name ?? "—"} {meta?.is_demo && <span className="demo-flag" title="Схема, ограничения и показатели демонстрационные">ДЕМО</span>}</span>
+        </div>
       </div>
-      <div className="hdr-block" aria-label="Модельное время">
+      <div className="hdr-chip" aria-label="Модельное время" title={`Модельное время · ${tzLabel()}`}>
         <span className="clock">{fmtHMS(meta?.model_time)}</span>
         <small>модельное время · {tzLabel()}</small>
       </div>
-      <div className="hdr-block">
-        <span><b title={meta?.real_time_mode ? "Модельное время идёт по часам сервера (×1)" : undefined}>{meta ? (meta.real_time_mode && meta.running ? "● Реальное время" : meta.running ? `▶ Симуляция ×${meta.speed}` : "⏸ Пауза") : "—"}</b></span>
+      <div className="hdr-chip" title={meta?.real_time_mode ? "Модельное время идёт по часам сервера (×1)" : meta?.scenario_title}>
+        <b className={meta?.running ? "" : "muted"}>{meta ? (meta.real_time_mode && meta.running ? "● Реальное время" : meta.running ? `▶ Симуляция ×${meta.speed}` : "⏸ Пауза") : "—"}</b>
         <small title="Сценарий симуляции">{meta?.scenario_title ?? ""}</small>
       </div>
-      <div className="seg" role="group" aria-label="Режим просмотра">
+      <div className="seg hdr-seg" role="group" aria-label="Режим просмотра">
         <button aria-pressed={mode === "live"} onClick={() => setMode("live")}>Сейчас</button>
         <button aria-pressed={mode === "history"} onClick={() => setMode("history")}>История</button>
         <button aria-pressed={mode === "forecast"} onClick={() => setMode("forecast")}>Прогноз</button>
       </div>
       <div className="grow" />
       {idx && (
-        <div className="hdr-block" title={`Индекс эффективности: ${idx.formula}. Качество оценки: ${idx.quality.label}`}>
+        <div className="hdr-chip" title={`Индекс эффективности: ${idx.formula}. Качество оценки: ${idx.quality.label}`}>
           <span><b className="mono">{idx.value ?? "—"}</b> <span className={`badge ${CAT_CLS[idx.category]}`}>{idx.category_label}</span></span>
-          <small>индекс эффективности · расчёт {fmtHM(idx.computed_at)}</small>
+          <small>индекс · расчёт {fmtHM(idx.computed_at)}</small>
         </div>
       )}
-      <div className="hdr-block" aria-live="polite">
+      <div className="hdr-chip" aria-live="polite" title={age !== null ? `Последние данные: ${fmtHMS(new Date(lastMsgAt).toISOString())} (реальное время)` : "Данных ещё нет"}>
         <span className={`badge ${connInfo.cls}`}><span aria-hidden>{conn === "online" ? "●" : conn === "offline" ? "✕" : "↻"}</span>{connInfo.text}</span>
-        <small>{age !== null ? `данные: ${fmtHMS(new Date(lastMsgAt).toISOString())} (реальное время)` : "данных ещё нет"}</small>
+        <small>{age !== null ? `данные: ${fmtHMS(new Date(lastMsgAt).toISOString())}` : "данных ещё нет"}</small>
       </div>
       {conn === "offline" && <button className="btn small" onClick={reconnectNow}>Переподключиться</button>}
       {user && <NotificationsBell />}
-      <button className="btn ghost small" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Сменить тему">
-        {theme === "dark" ? "☀ Светлая" : "☾ Тёмная"}
+      <button className="btn ghost icon-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={theme === "dark" ? "Светлая тема" : "Тёмная тема"}
+        title={theme === "dark" ? "Светлая тема" : "Тёмная тема"}>
+        <Icon name={theme === "dark" ? "sun" : "moon"} />
       </button>
       {user && (
-        <div className="hdr-block">
-          <span>{user.full_name}</span>
-          <small>{user.role_label ?? ROLE_LABEL[user.role]} · <a href="#" onClick={(e) => { e.preventDefault(); disconnect(); setToken(null); useStore.getState().setUser(null); }}>сменить пользователя</a></small>
+        <div className="hdr-user">
+          <span className="avatar" aria-hidden>{initials}</span>
+          <div className="hdr-user-text">
+            <span className="hdr-user-name" title={user.full_name}>{user.full_name}</span>
+            <small>{user.role_label ?? ROLE_LABEL[user.role]} · <a href="#" onClick={(e) => { e.preventDefault(); disconnect(); setToken(null); useStore.getState().setUser(null); }}>сменить пользователя</a></small>
+          </div>
         </div>
       )}
     </header>
