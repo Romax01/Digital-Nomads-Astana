@@ -1,11 +1,11 @@
 import { useEffect } from "react";
-import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, NavLink, Route, Routes } from "react-router-dom";
 import Header from "./components/Header";
 import { ForecastBar, ReplayBar } from "./components/Panels";
 import { Loading, Toasts } from "./components/ui";
 import { api, getToken, setToken } from "./lib/api";
 import { setTimezone } from "./lib/format";
-import { useStore } from "./lib/store";
+import { can, useStore } from "./lib/store";
 import { connect, disconnect, reconnectNow } from "./lib/ws";
 import Admin from "./pages/Admin";
 import Assistant from "./pages/Assistant";
@@ -40,8 +40,16 @@ function Nav() {
       {link("/assistant", "Помощник")}
       <div className="nav-sep" />
       {link("/settings", "Настройки")}
-      {link("/admin", "Пользователи и роли", user && !user.permissions?.includes("users.manage") ? <span className="badge muted" title="Изменения — только администратор">🔒</span> : null)}
-      <a className="nav-link" href="/docs" target="_blank" rel="noreferrer">API (Swagger)</a>
+      {/* разделы администратора не показываются другим ролям */}
+      {user?.permissions?.includes("users.manage") && link("/admin", "Пользователи и роли")}
+      {user?.permissions?.includes("api.docs") && (
+        <a className="nav-link" href="/docs" target="_blank" rel="noreferrer" onClick={async (e) => {
+          e.preventDefault();
+          const w = window.open("about:blank", "_blank");
+          try { await api.postPlain("/api/v1/auth/docs-session"); if (w) w.location.href = "/docs"; }
+          catch { w?.close(); useStore.getState().toast("error", "Описание API недоступно"); }
+        }}>API (Swagger)</a>
+      )}
     </nav>
   );
 }
@@ -50,6 +58,7 @@ function Shell() {
   const conn = useStore((s) => s.conn);
   const live = useStore((s) => s.live);
   const mode = useStore((s) => s.mode);
+  const user = useStore((s) => s.user);
   const setTopology = useStore((s) => s.setTopology);
   const stationKey = live ? `${live.meta.station_id}-${live.meta.scenario}-${live.meta.seed}` : "";
   useEffect(() => { connect(); return () => disconnect(); }, []);
@@ -85,7 +94,7 @@ function Shell() {
             <Route path="/journal" element={<Journal />} />
             <Route path="/assistant" element={<Assistant />} />
             <Route path="/settings" element={<Settings />} />
-            <Route path="/admin" element={<Admin />} />
+            <Route path="/admin" element={can(user, "users.manage") ? <Admin /> : <Navigate to="/" replace />} />
             <Route path="*" element={<Overview />} />
           </Routes>
         )}

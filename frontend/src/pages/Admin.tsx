@@ -8,16 +8,7 @@ export default function Admin() {
   const user = useStore((s) => s.user);
   const isAdmin = can(user, "users.manage");
   const perms = useFetch(() => api.get("/api/v1/permissions"), []);
-  if (!isAdmin) {
-    return (
-      <div className="page">
-        <h1>Пользователи и роли</h1>
-        <div className="callout warn">Раздел доступен только администратору: добавлять роли и пользователей, менять роли и
-          блокировать учётные записи может только системная роль «Администратор».</div>
-        {perms.data && <PermissionMatrix data={perms.data} />}
-      </div>
-    );
-  }
+  if (!isAdmin) return null;  // маршрут и пункт меню доступны только администратору
   return <AdminPanel perms={perms} />;
 }
 

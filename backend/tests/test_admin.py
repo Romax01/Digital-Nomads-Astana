@@ -85,3 +85,30 @@ def test_last_admin_cannot_be_removed(client, world, auth):
         assert r.status_code == 409 and r.json()["error"]["code"] == "LAST_ADMIN"
         r = client.put(f"/api/v1/admin/users/{admins[0]['id']}", headers=_h(adm), json={"active": False})
         assert r.status_code == 409
+
+
+def test_swagger_and_admin_api_hidden_from_regular_users(client, world, auth):
+    world("normal")
+    assert client.get("/redoc").status_code == 404
+    for u in ("train", "station", "duty", "viewer"):
+        h = auth(u)
+        assert client.get("/docs", headers=h).status_code == 403
+        assert client.get("/openapi.json", headers=h).status_code == 403
+        assert client.post("/api/v1/auth/docs-session", headers=h).status_code == 403
+        assert client.get("/api/v1/permissions", headers=h).status_code == 403
+        me = client.get("/api/v1/auth/me", headers=h).json()
+        assert "users.manage" not in me["permissions"] and "api.docs" not in me["permissions"]
+    assert client.get("/docs").status_code == 403 and client.get("/openapi.json").status_code == 403
+    # администратор: cookie-сеанс для браузера, затем Swagger и схема доступны
+    adm = auth("admin")
+    r = client.post("/api/v1/auth/docs-session", headers=adm)
+    assert r.status_code == 200 and "ds_docs" in r.cookies
+    assert "httponly" in r.headers["set-cookie"].lower()
+    assert client.get("/docs").status_code == 200
+    spec = client.get("/openapi.json").json()
+    assert "/api/v1/admin/roles" in spec["paths"]
+    client.cookies.clear()
+    # право нельзя выдать пользовательской роли
+    r = client.post("/api/v1/admin/roles", headers={**adm, "Idempotency-Key": uuid.uuid4().hex},
+                    json={"id": "api_reader", "name": "Читатель API", "permissions": ["api.docs"]})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "PERMISSION_RESERVED"

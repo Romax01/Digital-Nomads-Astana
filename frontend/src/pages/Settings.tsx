@@ -10,7 +10,7 @@ export default function Settings() {
   const user = useStore((s) => s.user);
   const st = useViewState();
   const sim = useFetch(() => api.get("/api/v1/sim"), [st?.meta.scenario, st?.meta.running, st?.meta.speed]);
-  const perms = useFetch(() => api.get("/api/v1/permissions"), []);
+  const perms = useFetch(() => (can(user, "users.manage") ? api.get("/api/v1/permissions") : Promise.resolve(null)), [user?.role]);
   const admin = can(user, "sim.control") ? null : "Управление симуляцией — роль «Администратор».";
   const cfgAdmin = can(user, "config.manage") ? null : "Изменение конфигурации — роль «Администратор».";
   const [scenario, setScenario] = useState("normal");
@@ -49,7 +49,7 @@ export default function Settings() {
       </section>
       <IndexConfig disabledReason={cfgAdmin} />
       <Policies disabledReason={cfgAdmin} />
-      {perms.data && <PermissionMatrix data={perms.data} />}
+      {can(user, "users.manage") && perms.data && <PermissionMatrix data={perms.data} />}
     </div>
   );
 }

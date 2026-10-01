@@ -4,7 +4,7 @@
 
 | Набор | Где | Результат |
 |---|---|---|
-| Backend: интеграционные тесты | `backend/tests/` на реальной PostgreSQL (`station_test`, миграции Alembic) | **46 из 46 прошли** (~90 с) |
+| Backend: интеграционные тесты | `backend/tests/` на реальной PostgreSQL (`station_test`, миграции Alembic) | **47 из 47 прошли** (~90 с) |
 | Сквозной сценарий `docs/demo.md` на запущенном стенде | `tools/demo_e2e.py` (через API, как интерфейс) | **0 ошибок** (≈ 50 проверок: шаги 1–6) |
 | Frontend: unit-тесты | `frontend/src/lib/reducer.test.ts` (vitest) | **5 из 5 прошли** |
 | Frontend: проверка типов и сборка | `tsc -b`, `vite build` | **без ошибок** |
@@ -35,6 +35,7 @@ cd frontend && npm test && npm run build
 | Допустимые переходы статусов | `test_api.py::test_status_transition_requires_check` |
 | Права доступа на backend | `test_permissions_matrix_enforced_on_backend` |
 | Роли и пользователи: только администратор, пользовательская роль действует сразу, зарезервированное право, системные роли, последний администратор | `test_admin.py` (4 теста) |
+| Swagger, OpenAPI, матрица прав и админ-API скрыты от обычных ролей; cookie-сеанс администратора | `test_swagger_and_admin_api_hidden_from_regular_users` |
 | Единый формат ошибок, сообщения валидации на русском | `test_error_format_and_auth`, `test_validation_error_in_russian` |
 | Конкурентное резервирование (2 параллельные заявки) | `test_concurrent_confirm_no_double_booking` |
 | Повторная отправка команды (Idempotency-Key) | `test_idempotent_confirm` |

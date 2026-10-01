@@ -78,6 +78,10 @@ app = FastAPI(
                 "Ошибки возвращаются в едином формате {error: {code, message, details, hint}}.",
     openapi_tags=TAGS,
     lifespan=lifespan,
+    # стандартные /docs, /redoc и /openapi.json отключены: описание API доступно только администратору
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 app.add_middleware(GZipMiddleware, minimum_size=2000)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -97,6 +101,56 @@ async def timing(request: Request, call_next):
         metrics.observe("api_ms", ms)
     resp.headers["X-Response-Time-ms"] = f"{ms:.1f}"
     return resp
+
+
+from fastapi.openapi.docs import get_swagger_ui_html  # noqa: E402
+from fastapi.openapi.utils import get_openapi  # noqa: E402
+from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
+
+DOCS_COOKIE = "ds_docs"
+
+
+def _docs_allowed(request: Request) -> bool:
+    """Описание API — только для роли с правом api.docs (администратор). Токен берётся из
+    HttpOnly-cookie, выдаваемой POST /api/v1/auth/docs-session, или из заголовка Authorization."""
+    from app.core.permissions import can
+    from app.core.security import user_from_token
+    from app.db import SessionLocal
+    token = request.cookies.get(DOCS_COOKIE)
+    auth = request.headers.get("authorization", "")
+    if not token and auth.lower().startswith("bearer "):
+        token = auth[7:]
+    if not token:
+        return False
+    try:
+        with SessionLocal() as db:
+            return can(user_from_token(db, token), "api.docs")
+    except Exception:
+        return False
+
+
+@app.get("/docs", include_in_schema=False)
+def swagger_ui(request: Request):
+    if not _docs_allowed(request):
+        return HTMLResponse(status_code=403, content=(
+            "<!doctype html><html lang='ru'><meta charset='utf-8'><title>Доступ запрещён</title>"
+            "<body style='font-family:system-ui;background:#0d141c;color:#e7edf3;padding:40px'>"
+            "<h1>Описание API недоступно</h1><p>Swagger открыт только для администратора стенда. "
+            "Войдите в интерфейс под ролью «Администратор» и откройте «API (Swagger)» из меню.</p>"
+            "<p><a style='color:#5aa9ff' href='/'>Вернуться в интерфейс</a></p></body></html>"))
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="Цифровая станция — API (демо)")
+
+
+@app.get("/openapi.json", include_in_schema=False)
+def openapi_json(request: Request):
+    if not _docs_allowed(request):
+        return JSONResponse(status_code=403, content={"error": {
+            "code": "FORBIDDEN", "message": "Описание API доступно только администратору.", "details": None,
+            "hint": "Войдите под ролью «Администратор»."}})
+    if app.openapi_schema is None:
+        app.openapi_schema = get_openapi(title=app.title, version=app.version, description=app.description,
+                                         routes=app.routes, tags=TAGS)
+    return JSONResponse(app.openapi_schema)
 
 
 from app.api.routes import router as api_router  # noqa: E402

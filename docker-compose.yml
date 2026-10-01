@@ -18,7 +18,8 @@ services:
       timeout: 3s
       retries: 30
     ports:
-      - "${DB_PORT:-5432}:5432"
+      # только локально: база данных не видна в сети
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
 
   mqtt:
     image: eclipse-mosquitto:2.0.20
@@ -64,7 +65,8 @@ services:
       timeout: 5s
       retries: 30
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      # только локально: из сети API доступен через frontend (порт 8080)
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
 
   simulator:
     build: ./simulator

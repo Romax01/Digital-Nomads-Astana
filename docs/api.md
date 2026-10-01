@@ -1,6 +1,6 @@
 # API
 
-Базовый путь — `/api/v1`. Интерактивная документация OpenAPI (Swagger) с русскими описаниями доступна по адресам `http://localhost:8000/docs` и `http://localhost:8080/docs` (через nginx).
+Базовый путь — `/api/v1`. Интерактивная документация OpenAPI (Swagger) с русскими описаниями доступна только администратору — `http://localhost:8080/docs` после входа через пункт меню «API (Swagger)» (см. раздел «Доступ к описанию API»).
 
 ## Аутентификация
 
@@ -128,3 +128,14 @@ curl -s -X POST $API/requests/RQ-Z-0001/confirm -H "Authorization: Bearer $DUTY"
 curl -X POST http://localhost:8080/api/v1/admin/roles -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/json" \
   -d '{"id":"shift_master","name":"Сменный мастер","permissions":["incident.manage","request.check"]}'
 ```
+
+## Доступ к описанию API
+
+Стандартные `/docs`, `/redoc` и `/openapi.json` FastAPI отключены. Swagger и схема OpenAPI доступны **только администратору** (право `api.docs`, его нельзя выдать пользовательской роли):
+
+1. Интерфейс вызывает `POST /api/v1/auth/docs-session` с токеном администратора. Сервер ставит HttpOnly-cookie `ds_docs` (SameSite=Strict, 1 ч).
+2. Затем открывается `/docs`; `/openapi.json` проверяет ту же cookie или заголовок `Authorization`.
+
+Без прав администратора `/docs` возвращает страницу 403, а `/openapi.json` — ошибку `FORBIDDEN`. `/redoc` не существует.
+
+Наружу (в сеть) публикуется только порт интерфейса 8080. Backend (8000) и PostgreSQL (5432) привязаны к `127.0.0.1`, поэтому закрытие Swagger нельзя обойти прямым обращением к backend из сети. MQTT 1883 доступен в сети для подключения устройств: анонимный доступ запрещён, права на топики заданы ACL.

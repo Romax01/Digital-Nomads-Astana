@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import Response
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
@@ -66,8 +66,17 @@ def demo_users(db: Session = Depends(get_db)):
                                 .order_by(User.id)).scalars()]
 
 
-@router.get("/permissions", tags=["Доступ"], summary="Матрица прав (предварительная ролевая модель MVP)")
-def permissions():
+@router.post("/auth/docs-session", tags=["Доступ"], summary="Открыть доступ к Swagger в браузере (только администратор)")
+def docs_session(request: Request, user: User = Depends(require("api.docs"))):
+    from fastapi.responses import JSONResponse
+    resp = JSONResponse({"ok": True, "url": "/docs"})
+    # HttpOnly: токен не доступен скриптам страницы; SameSite=Strict: не отправляется с чужих сайтов
+    resp.set_cookie("ds_docs", issue_token(user), max_age=3600, httponly=True, samesite="strict", path="/")
+    return resp
+
+
+@router.get("/permissions", tags=["Доступ"], summary="Матрица прав (только администратор)")
+def permissions(_: User = Depends(require("users.manage"))):
     return {"roles": all_roles(), "system_roles": list(ROLES), "matrix": matrix(),
             "note": "Ролевая модель — допущение MVP; требует проверки полномочий профильным специалистом."}
 

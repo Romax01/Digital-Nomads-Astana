@@ -48,9 +48,10 @@ PERMISSIONS: dict[str, tuple[str, set[str]]] = {
     "sim.control": ("Управление симуляцией и демо-сценариями", {"admin"}),
     "config.manage": ("Конфигурация индекса, политик и порогов", {"admin"}),
     "users.manage": ("Управление пользователями и ролями", {"admin"}),
+    "api.docs": ("Описание API (Swagger / OpenAPI)", {"admin"}),
 }
 # права, которые нельзя выдать пользовательской роли
-RESERVED_ACTIONS = {"users.manage"}
+RESERVED_ACTIONS = {"users.manage", "api.docs"}
 # базовое право: без просмотра состояния интерфейс бесполезен
 BASE_ACTIONS = {"state.view"}
 
