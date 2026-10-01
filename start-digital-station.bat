@@ -1,24 +1,44 @@
 @echo off
 rem ======================================================================
-rem  Цифровая станция — запуск на любом ПК с Windows 10/11.
-rem  Нужен только Docker Desktop (батник проверит и предложит установить).
-rem  Использование:  start-digital-station.bat [stop | status | update | uninstall]
+rem  Digital Station (Tsifrovaya stantsiya) - launcher for any Windows 10/11 PC.
+rem  Only Docker Desktop is required (the script checks it and offers to install).
+rem  Usage: start-digital-station.bat [stop | status | update | uninstall]
+rem  This cmd part is ASCII only and does not call chcp: with a UTF-8 file,
+rem  chcp 65001 makes cmd misread the rest of the file and close the window.
 rem ======================================================================
-chcp 65001 >nul
-setlocal
+setlocal EnableDelayedExpansion
 set "DS_BAT=%~f0"
 set "DS_HERE=%~dp0"
 set "DS_ARGS=%*"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$c=[IO.File]::ReadAllText($env:DS_BAT,[Text.Encoding]::UTF8); $i=$c.LastIndexOf('#PS-' + 'START'); Invoke-Expression $c.Substring($i)"
-set "RC=%ERRORLEVEL%"
-echo.
-if not defined DS_NOPAUSE pause
-exit /b %RC%
+set "DS_PS1=%TEMP%\digital-station-launcher.ps1"
+set "DS_LOG=%TEMP%\digital-station-launch.log"
+rem Everything below is ONE parenthesized block: cmd parses it before PowerShell
+rem switches the console code page to UTF-8, so cmd never re-reads this file.
+(
+  where powershell >nul 2>nul || (echo PowerShell not found. & pause & exit /b 1)
+  rem 1) extract the PowerShell part of this file into a temporary .ps1 (UTF-8 with BOM)
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$c=[IO.File]::ReadAllText($env:DS_BAT,[Text.Encoding]::UTF8); $i=$c.LastIndexOf('#PS-' + 'START'); [IO.File]::WriteAllText($env:DS_PS1, $c.Substring($i), (New-Object Text.UTF8Encoding $true))"
+  if not exist "!DS_PS1!" (
+    echo Could not prepare the launcher in %TEMP%. Check antivirus or disk access.
+    pause
+    exit /b 1
+  )
+  rem 2) run it as a normal script file
+  powershell -NoProfile -ExecutionPolicy Bypass -File "!DS_PS1!"
+  set "RC=!ERRORLEVEL!"
+  echo.
+  if not "!RC!"=="0" echo Exit code !RC!. Log file: !DS_LOG!
+  if not defined DS_NOPAUSE pause
+  exit /b !RC!
+)
 
 #PS-START
 # Continue: служебный вывод docker идёт в stderr и не должен прерывать сценарий; ошибки проверяются явно
 $ErrorActionPreference = "Continue"
+try { Start-Transcript -Path $env:DS_LOG -Force | Out-Null } catch { }
+trap { Write-Host ""; Write-Host ("НЕПРЕДВИДЕННАЯ ОШИБКА: " + $_) -ForegroundColor Red; Write-Host "Журнал: $env:DS_LOG"; try { Stop-Transcript | Out-Null } catch { }; exit 2 }
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
+try { [Console]::InputEncoding = [Text.Encoding]::UTF8 } catch { }
 $Repo = "https://github.com/Romax01/Digtal-Nomads-Astana"
 $ZipUrl = "$Repo/archive/refs/heads/main.zip"
 $Action = (($env:DS_ARGS + "").Trim().ToLower() -split "\s+")[0]
@@ -26,7 +46,7 @@ if (-not $Action) { $Action = "start" }
 
 function Say($t, $c = "Gray") { Write-Host $t -ForegroundColor $c }
 function Step($t) { Write-Host ""; Write-Host "== $t" -ForegroundColor Cyan }
-function Fail($t) { Write-Host ""; Write-Host "ОШИБКА: $t" -ForegroundColor Red; exit 1 }
+function Fail($t) { Write-Host ""; Write-Host "ОШИБКА: $t" -ForegroundColor Red; Write-Host "Журнал запуска: $env:DS_LOG" -ForegroundColor Gray; try { Stop-Transcript | Out-Null } catch { }; exit 1 }
 function Ask($q, $def = "n") {
   $s = if ($def -eq "y") { "[Д/н]" } else { "[д/Н]" }
   $a = Read-Host "$q $s"
