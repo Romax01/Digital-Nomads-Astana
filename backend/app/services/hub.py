@@ -71,9 +71,14 @@ class Hub:
 
     # ------------------------------------------------------------- шина
     def push_work_event(self, topic: str, payload: dict):
-        """Событие процесса работников — только тем клиентам, кому объект виден по правилам REST."""
+        """Событие процесса работников — только тем клиентам, кому объект виден по правилам REST.
+        Проверка видимости читает БД, поэтому выполняется в фоновом потоке, а не в потоке запроса."""
         if not self.loop:
             return
+        threading.Thread(target=self._push_work_event, args=(topic, payload), daemon=True,
+                         name="work-events").start()
+
+    def _push_work_event(self, topic: str, payload: dict):
         from app.models import DefectReport, WorkOrder
         from app.services import workflow as wf
         targets = []

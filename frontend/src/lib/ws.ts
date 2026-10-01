@@ -3,6 +3,7 @@
 import { getToken } from "./api";
 import { applyDelta } from "./reducer";
 import { useStore } from "./store";
+import { observeServer, resetClock } from "../twin/clock";
 
 let ws: WebSocket | null = null;
 let attempts = 0;
@@ -37,6 +38,7 @@ export function connect() {
     if (m.server_time) useStore.setState({ serverOffsetMs: m.server_time * 1000 - Date.now() });
     if (m.type === "ping") {
       sock.send(JSON.stringify({ type: "pong", server_time: m.server_time }));
+      observeServer(m.server_time, undefined);
       useStore.setState({ lastMsgAt: Date.now() });
       return;
     }
@@ -45,6 +47,8 @@ export function connect() {
       return;
     }
     if (m.type === "snapshot") {
+      resetClock();
+      observeServer(m.server_time, m.state?.meta?.model_time, m.state?.meta?.speed, m.state?.meta?.running);
       useStore.setState({ live: m.state, version: m.version, lastMsgAt: Date.now() });
       return;
     }
@@ -54,7 +58,9 @@ export function connect() {
         sock.send(JSON.stringify({ type: "hello", last_version: -1 }));
         return;
       }
-      useStore.setState({ live: applyDelta(s.live, m.delta), version: m.version, lastMsgAt: Date.now() });
+      const next = applyDelta(s.live, m.delta);
+      observeServer(m.server_time, next.meta.model_time, next.meta.speed, next.meta.running);
+      useStore.setState({ live: next, version: m.version, lastMsgAt: Date.now() });
       if (m.trace?.event_received_at) {
         // Видимая вкладка: до кадра отрисовки (два requestAnimationFrame).
         // Фоновая вкладка: до обновления DOM (MessageChannel выполняется после синхронной фиксации React

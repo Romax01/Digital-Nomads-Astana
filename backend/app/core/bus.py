@@ -48,6 +48,11 @@ def publish_after_commit(db: Session, topic: str, payload: dict | None = None):
 
 @event.listens_for(Session, "after_commit")
 def _flush_events(session: Session):
+    # Фиксация вложенной транзакции (SAVEPOINT) — ещё не фиксация в БД: внешняя транзакция держит
+    # блокировки. Публикация в этот момент приводила к самоблокировке (подписчик открывал новое
+    # соединение и ждал блокировок того же потока). Публикуем только после внешней фиксации.
+    if session.in_nested_transaction():
+        return
     events = session.info.pop("pending_events", [])
     for topic, payload in events:
         publish(topic, payload)
@@ -55,4 +60,7 @@ def _flush_events(session: Session):
 
 @event.listens_for(Session, "after_rollback")
 def _drop_events(session: Session):
+    # откат SAVEPOINT не отменяет события внешней транзакции
+    if session.in_nested_transaction():
+        return
     session.info.pop("pending_events", None)

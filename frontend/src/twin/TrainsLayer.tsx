@@ -8,7 +8,7 @@ import * as THREE from "three";
 import { forecastOccupancy } from "../lib/forecast";
 import { useStore } from "../lib/store";
 import type { Topology, TrainState, ViewState } from "../lib/types";
-import { headNow, layoutConsist, pointAtExt, polyLen, type P2, type Vehicle } from "./geometry";
+import { blendVehicles, headNow, layoutConsist, pointAtExt, polyLen, smoothHead, type P2, type Vehicle } from "./geometry";
 import { useLabelGroup, type LabelSpec } from "./labels";
 import { buildBodies, buildBogie, buildWheelset, disposeAll } from "./models";
 import { frameState, SCENE } from "./palette";
@@ -19,6 +19,13 @@ const NEAR_BOGIES = 1300; // дальше — только кузова (упр�
 const NEAR_WHEELS = 650;
 
 interface Placed { train: TrainState; path: P2[]; head: number; body: number; forecast: boolean }
+/** Отрисованное состояние состава между кадрами: сглаженная голова и последняя раскладка. */
+interface Smooth { sig: string; head: number; veh: Vehicle[]; from: Vehicle[] | null; t0: number }
+const BLEND_MS = 450;
+const sigOf = (pl: Placed) => {
+  const p = pl.path, a = p[0], b = p[p.length - 1];
+  return `${pl.forecast ? "f" : ""}${pl.train.pos?.op_id ?? "stand"}|${p.length}|${a[0].toFixed(0)},${a[1].toFixed(0)}|${b[0].toFixed(0)},${b[1].toFixed(0)}`;
+};
 
 /** Положения составов для текущего кадра: «Сейчас»/«История» — от сервера, «Прогноз» — стоянки по прогнозному плану. */
 function placements(st: ViewState, topo: Topology, elapsed: number, forecastAt: string | null, mode: string, k: number,
@@ -65,11 +72,14 @@ export function TrainsLayer({ topo, st }: { topo: Topology; st: ViewState }) {
   const plateOwner = useRef<string[]>([]);
   const fc = useRef({ key: "", val: {} as Record<string, { train_id: string; number: string }> });
   const heads = useRef<Record<string, [number, number, number]>>({});
+  const smooth = useRef(new Map<string, Smooth>());
   useEffect(() => () => disposeAll([...Object.values(bodies), bogieGeo, wheelGeo, plateGeo]), [bodies, bogieGeo, wheelGeo, plateGeo]);
 
   const tmp = useMemo(() => ({ m: new THREE.Matrix4(), q: new THREE.Quaternion(), p: new THREE.Vector3(), s: new THREE.Vector3(), c: new THREE.Color(), up: new THREE.Vector3(0, 1, 0), t: new THREE.Vector3() }), []);
 
-  useFrame(({ controls }) => {
+  useFrame(({ controls }, frameDt) => {
+    const dt = Math.min(0.1, frameDt);
+    const nowMs = performance.now();
     const { st: cur, elapsed } = frameState();
     if (!cur) return;
     const s = useStore.getState();
@@ -84,10 +94,33 @@ export function TrainsLayer({ topo, st }: { topo: Topology; st: ViewState }) {
     const yRail = d.railTop;
     const list = placements(cur, topo, elapsed, s.forecastAt, s.mode, d.k, fc.current);
     const newHeads: Record<string, [number, number, number]> = {};
+    // модельных секунд в секунду реального времени (0 — пауза, история, прогноз, нет связи)
+    const live = s.mode === "live" && s.conn === "online" && cur.meta.running;
+    const mps = live ? cur.meta.speed : 0;
+    const seen = new Set<string>();
     for (const pl of list) {
       const tr = pl.train;
-      const veh: Vehicle[] = layoutConsist(pl.path, pl.head, pl.body, tr.consist, tr.wagons, tr.kind);
-      const hp = pointAtExt(pl.path, pl.head);
+      seen.add(tr.id);
+      const sig = sigOf(pl);
+      let sm = smooth.current.get(tr.id);
+      if (!sm || sm.sig !== sig) {
+        // новый маршрут: голова — по серверу, а видимые вагоны плавно перетекают из прежнего положения
+        sm = { sig, head: pl.head, veh: sm?.veh ?? [], from: sm?.veh?.length ? sm.veh : null, t0: nowMs };
+        smooth.current.set(tr.id, sm);
+      } else if (live && pl.train.pos?.moving) {
+        if (Math.abs(pl.head - sm.head) > 120) { sm.from = sm.veh; sm.t0 = nowMs; }  // крупная поправка — тоже перетеканием
+        sm.head = smoothHead(sm.head, pl.head, (pl.train.pos.speed || 0) * mps, dt, pl.train.pos.head_end);
+      } else {
+        sm.head = pl.head;
+      }
+      let veh: Vehicle[] = layoutConsist(pl.path, sm.head, pl.body, tr.consist, tr.wagons, tr.kind);
+      if (sm.from) {
+        const a = (nowMs - sm.t0) / BLEND_MS;
+        if (a >= 1 || sm.from.length !== veh.length) sm.from = null;
+        else veh = blendVehicles(sm.from, veh, a);
+      }
+      sm.veh = veh;
+      const hp = pointAtExt(pl.path, sm.head);
       newHeads[tr.id] = [hp[0], yRail + 6 * d.kc, hp[1]];
       const isSel = sel === tr.id, isHl = hl.has(tr.id);
       for (const v of veh) {
@@ -128,20 +161,19 @@ export function TrainsLayer({ topo, st }: { topo: Topology; st: ViewState }) {
       }
     }
     heads.current = newHeads;
+    for (const id of smooth.current.keys()) if (!seen.has(id)) smooth.current.delete(id);
     for (const key of keys) {
       const mesh = bodyRefs.current[key];
       if (!mesh) continue;
       mesh.count = counts[key];
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-      mesh.computeBoundingSphere();
     }
-    if (bogies.current) { bogies.current.count = nb; bogies.current.instanceMatrix.needsUpdate = true; bogies.current.computeBoundingSphere(); }
-    if (wheels.current) { wheels.current.count = nw; wheels.current.instanceMatrix.needsUpdate = true; wheels.current.computeBoundingSphere(); }
+    if (bogies.current) { bogies.current.count = nb; bogies.current.instanceMatrix.needsUpdate = true; }
+    if (wheels.current) { wheels.current.count = nw; wheels.current.instanceMatrix.needsUpdate = true; }
     if (plates.current) {
       plates.current.count = np; plates.current.instanceMatrix.needsUpdate = true;
       if (plates.current.instanceColor) plates.current.instanceColor.needsUpdate = true;
-      plates.current.computeBoundingSphere();
     }
   });
 

@@ -1,6 +1,7 @@
 // Палитра сцены (по мотивам 3darchive: тёмная сцена, циан-акцент) и отображаемые статусы.
 // Статус всегда передаётся цветом И текстом/значком.
 import { useStore } from "../lib/store";
+import { modelNowMs } from "./clock";
 import type { TrackState, ViewState } from "../lib/types";
 
 export const SCENE = {
@@ -34,6 +35,9 @@ export function frameState(): { st: ViewState | null; elapsed: number } {
   const s = useStore.getState();
   const st = s.mode === "history" ? s.replay.frames[s.replay.index]?.state ?? null : s.live;
   if (!st || s.mode !== "live" || s.conn !== "online" || !st.meta.running) return { st, elapsed: 0 };
-  const realS = Math.min(5, Math.max(0, (Date.now() - s.lastMsgAt) / 1000));
-  return { st, elapsed: realS * st.meta.speed };
+  // прошло модельного времени с момента, на который сервер рассчитал позиции (по часам сервера)
+  const now = modelNowMs();
+  if (now === null) return { st, elapsed: 0 };
+  const el = (now - Date.parse(st.meta.model_time)) / 1000;
+  return { st, elapsed: Math.min(5 * Math.max(1, st.meta.speed), Math.max(0, el)) };
 }

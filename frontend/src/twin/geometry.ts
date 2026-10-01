@@ -159,3 +159,35 @@ export function layoutLabels(cands: LabelCand[], maxN: number, vw: number, vh: n
 
 /** Плавное приближение (как в 3darchive: 1 − e^(−k·dt)), не зависит от частоты кадров. */
 export const damp = (k: number, dt: number) => 1 - Math.exp(-k * dt);
+
+// ------------------------------------------------------------------ сглаживание движения
+
+/** Плавная голова состава: едем с предсказанной скоростью, поправки сервера вливаются мягко.
+ *  Назад при движении вперёд не откатываемся (только замедляемся); большие расхождения — сразу. */
+export function smoothHead(prev: number, target: number, rate: number, dt: number, headEnd: number, snap = 120): number {
+  const pred = prev + rate * dt;
+  const err = target - pred;
+  if (Math.abs(err) > snap) return target;
+  let h = pred + err * damp(4, dt);
+  if (rate > 0) h = Math.max(prev, Math.min(h, headEnd));
+  return h;
+}
+
+const lerpAngle = (a: number, b: number, t: number) => {
+  let d = b - a;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return a + d * t;
+};
+
+/** Перетекание между двумя раскладками состава (смена маршрута: прибытие → стоянка, манёвр). */
+export function blendVehicles(from: Vehicle[], to: Vehicle[], t: number): Vehicle[] {
+  const e = t * t * (3 - 2 * t);
+  return to.map((v, i) => {
+    const f = from[i];
+    if (!f) return v;
+    const L = (a: number, b: number) => a + (b - a) * e;
+    return { ...v, x: L(f.x, v.x), y: L(f.y, v.y), yaw: lerpAngle(f.yaw, v.yaw, e), fx: L(f.fx, v.fx), fy: L(f.fy, v.fy),
+      rx: L(f.rx, v.rx), ry: L(f.ry, v.ry), fyaw: lerpAngle(f.fyaw, v.fyaw, e), ryaw: lerpAngle(f.ryaw, v.ryaw, e) };
+  });
+}

@@ -90,7 +90,9 @@ export function LabelLayer({ overlay, reg }: { overlay: React.RefObject<HTMLDivE
         const w = p.w || Math.max(s.text.length, s.sub?.length ?? 0) * 6.4 + 14;
         const h = p.h || (s.sub ? 30 : 18);
         // ближние подписи немного важнее дальних при равном приоритете
-        cands.push({ id: s.id, x: q.x, y: q.y, w, h, priority: s.priority - Math.min(5, q.d / 1500) });
+        // уже видимые подписи держатся (гистерезис): не мигают при небольших сдвигах камеры и поездов
+        const stay = visible.current.has(s.id) ? 6 : 0;
+        cands.push({ id: s.id, x: q.x, y: q.y, w, h, priority: s.priority - Math.min(5, q.d / 1500) + stay });
       }
       visible.current = layoutLabels(cands, MAX_LABELS, size.width, size.height);
     }
@@ -101,7 +103,7 @@ export function LabelLayer({ overlay, reg }: { overlay: React.RefObject<HTMLDivE
           p.el.style.display = "";
           p.w = p.el.offsetWidth; p.h = p.el.offsetHeight;
         }
-        p.el.style.transform = `translate(${Math.round(q.x - p.w / 2)}px, ${Math.round(q.y - p.h - 6)}px)`;
+        p.el.style.transform = `translate3d(${(q.x - p.w / 2).toFixed(1)}px, ${(q.y - p.h - 6).toFixed(1)}px, 0)`;
       } else if (p.el.style.display !== "none") p.el.style.display = "none";
     }
   });
